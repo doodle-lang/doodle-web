@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# The cross-surface conformance gate (implementation-plan §4.1): builds the wasm engine
+# from the sibling doodle-rust checkout and drives its conformance fixtures through the
+# wasm facade + pump in Node, proving the facade preserves engine determinism.
+jobs:
+  engine:
+    name: engine (pump + conformance-through-wasm)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout doodle-web
+        uses: actions/checkout@v6
+        with:
+          path: doodle-web
+      - name: Checkout doodle-rust (wasm crate + conformance fixtures)
+        uses: actions/checkout@v6
+        with:
+          repository: doodle-lang/doodle-rust
+          path: doodle-rust
+
+      - name: Install the pinned Rust toolchain + wasm32 target
+        working-directory: doodle-rust
+        run: rustup toolchain install
+      - name: Install wasm-bindgen-cli (version matched to doodle-rust's Cargo.lock)
+        working-directory: doodle-rust
+        run: |
+          ver=$(awk '/^name = "wasm-bindgen"$/{f=1} f && /^version = /{gsub(/[",]/,"",$3); print $3; exit}' Cargo.lock)
+          [ -n "$ver" ] || { echo "no wasm-bindgen entry in Cargo.lock"; exit 1; }
+          echo "installing wasm-bindgen-cli $ver"
+          cargo install wasm-bindgen-cli --version "$ver" --locked
+
+      - name: Build the wasm engine (doodle-rust -> packages/engine/wasm)
+        working-directory: doodle-web
+        run: ./scripts/build-wasm.sh
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install JS deps
+        working-directory: doodle-web
+        run: npm ci
+      - name: Typecheck
+        working-directory: doodle-web
+        run: npm run typecheck --workspace @doodle-lang/engine
+      - name: Test (pump + conformance-through-wasm)
+        working-directory: doodle-web
+        run: npm test --workspace @doodle-lang/engine
