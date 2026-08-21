@@ -1,0 +1,27 @@
+{
+  "name": "@doodle-lang/engine",
+  "version": "0.0.0",
+  "description": "The Doodle language engine for JavaScript: a fuel-sliced WebAssembly pump.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "wasm"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test",
+    "prepublishOnly": "test -f wasm/doodle_wasm_bg.wasm && test -f dist/index.js || { echo 'run build-wasm and build before publishing (wasm/ + dist/ must exist)'; exit 1; }"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}

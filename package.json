@@ -1,0 +1,16 @@
+{
+  "name": "doodle-web",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Doodle on the web: the @doodle-lang/engine wasm pump and the browser demo.",
+  "license": "MIT",
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build-wasm": "./scripts/build-wasm.sh",
+    "typecheck": "npm run --workspaces --if-present typecheck",
+    "test": "npm run --workspaces --if-present test"
+  }
+}
