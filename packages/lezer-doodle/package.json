@@ -21,6 +21,7 @@
     "test": "npm run build:grammar && node --test"
   },
   "dependencies": {
+    "@codemirror/language": "^6.10.0",
     "@lezer/lr": "^1.4.0",
     "@lezer/highlight": "^1.2.0"
   },
