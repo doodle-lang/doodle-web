@@ -1,0 +1,286 @@
+// A Lezer grammar for Doodle (language spec App A + §3). This is the IDE/highlighting
+// grammar, deliberately *not* the engine's parser (implementation-plan §6.4): a
+// grammar-parity corpus keeps the two classifying the same programs valid/invalid.
+//
+// Newlines are significant statement separators (§3.2). Continuation is handled two ways:
+//   - inside `(`/`[`/`{` a newline is insignificant — the external tokenizer (tokens.js)
+//     emits a skipped `newlineBracketed` there, keyed on a bracket-depth context tracker;
+//   - after a binary/word operator or a comma, an optional newline continues the line —
+//     the operator rules and comma-lists allow `nl` (a run of newlines) at those points.
+
+@context trackBrackets from "./tokens.js"
+@external tokens newlines from "./tokens.js" { newline, newlineBracketed }
+
+@top Program { separated<statement> }
+
+// A separator-delimited statement list with optional leading/trailing separators and
+// blank lines (§3.2: consecutive separators have no effect). Unambiguous: every statement
+// but the last is followed by `sep+`; the last may omit it. Two statements with no
+// separator between them (e.g. `1 2` on one line) do not parse — the desired error.
+separated<stmt> { sep* (stmt sep+)* stmt? }
+sep { newline | ";" }
+
+// `if`/`try` are not listed as statements: they reach statement position through
+// AssignOrExpr → expression (IfExpr/TryExpr), which avoids a reduce/reduce with the
+// expression forms. IfExpr's `else` is optional, so a bare `if c then … end` statement
+// (L§7 optional-else if-statement) still parses; the value-position "an if-expression
+// needs an else" rule is an engine check, not a CFG one.
+//
+// Placement (§7.1) is an engine check, not a CFG one: the grammar accepts the module-level
+// decls (record/protocol/implement/module/parameter/import/exports) anywhere a statement is
+// allowed, but the engine rejects them nested in a body. (Same class as lvalue validity.)
+statement {
+  LetStmt | ConstStmt |
+  WhileStmt | LoopStmt | WithStmt |
+  ReturnStmt | BreakStmt | ContinueStmt | RaiseStmt |
+  ToDecl | FnDecl |
+  RecordDecl | ProtocolDecl | ImplementDecl |
+  ModuleDecl | ParameterDecl |
+  ImportStmt | ExportsStmt |
+  AssignOrExpr
+}
+
+LetStmt { kw<"let"> Identifier "=" expression }
+ConstStmt { kw<"const"> Identifier "=" expression }
+ParameterDecl { kw<"parameter"> Identifier "=" expression }
+
+// An assignment (lvalue "=" expr) or a bare expression statement. Lvalue validity is an
+// engine check, not a CFG one — the grammar allows any expression on the left.
+AssignOrExpr { expression ("=" expression)? }
+
+// `while`/`with` headers parse in no-trailing-block mode (S-4, §6.4/§7.6): the `do` opens
+// the construct body, so a call in the header takes no block argument (headerExpr) unless
+// parenthesized. `loop` has no header expression.
+WhileStmt { kw<"while"> headerExpr kw<"do"> Body kw<"end"> }
+LoopStmt { kw<"loop"> kw<"do"> Body kw<"end"> }
+WithStmt { kw<"with"> Identifier "=" headerExpr kw<"do"> Body kw<"end"> }
+
+ReturnStmt { kw<"return"> expression? }
+BreakStmt { kw<"break"> expression? }
+ContinueStmt { kw<"continue"> expression? }
+RaiseStmt { kw<"raise"> expression? }
+
+ToDecl { kw<"to"> Identifier ParenL params? ParenR Body kw<"end"> }
+FnDecl { kw<"fn"> Identifier ParenL params? ParenR Body kw<"end"> }
+AnonFn { kw<"fn"> ParenL params? ParenR Body kw<"end"> }
+params { param (commaNl param)* commaNl? }
+param { Identifier ("=" expression)? | kw<"do"> Identifier }
+
+// A record body is docstring-only — records have no methods (the engine restricts App A's
+// `body?` to a docstring); the Lezer grammar matches, so a non-docstring statement in a
+// record body is rejected like the engine does.
+RecordDecl { kw<"ref">? kw<"record"> Identifier kw<"with"> Identifier (commaNl Identifier)* sep* (Docstring sep*)? kw<"end"> }
+ProtocolDecl { kw<"protocol"> Identifier (kw<"extends"> Identifier)? memberList<protoItem> kw<"end"> }
+// A leading docstring's placement (it must come first, §8.6) is an engine check, not a
+// CFG one — the grammar accepts a Docstring statement anywhere among the members.
+protoItem { Docstring | ProtoMember }
+ProtoMember { (kw<"to"> | kw<"fn">) Identifier ParenL params? ParenR Body kw<"end"> }
+ImplementDecl { kw<"implement"> Identifier kw<"for"> Identifier memberList<ToDecl | FnDecl> kw<"end"> }
+// Protocol/implement members are each self-delimited by `end`, so a separator between them
+// is optional (App A: `proto-member*` / `( to-decl | fn-decl )*`) — unlike a statement body.
+memberList<member> { sep* (member sep*)* }
+ModuleDecl { kw<"module"> Identifier Body kw<"end"> }
+ExportsStmt { kw<"exports"> Identifier (commaNl Identifier)* }
+
+ImportStmt { kw<"import"> importTarget (commaNl importTarget)* }
+// `module-path` already absorbs `.name` segments (the tokenizer splits `.name` from the
+// `.*` wildcard token), so importing a whole module vs a member is one form + optional
+// `as`; which the final segment is (module or member) is an engine resolution concern.
+importTarget { ModulePath (kw<"as"> Identifier)? | ModulePath ImportWildcard }
+ModulePath { Identifier ("." Identifier)* }
+
+Body { separated<statement> }
+Docstring { String | TripleString }
+
+// Expressions — the App A precedence ladder (highest binds tightest). `nl` after each
+// operator lets a trailing operator continue onto the next physical line (§3.2).
+expression { OrExpr }
+OrExpr { AndExpr (kw<"or"> nl AndExpr)* }
+AndExpr { NotExpr (kw<"and"> nl NotExpr)* }
+NotExpr { kw<"not"> NotExpr | CmpExpr }
+CmpExpr { AddExpr (CmpOp nl AddExpr)? }
+CmpOp { "==" | "!=" | "<" | ">" | "<=" | ">=" | kw<"is"> }
+AddExpr { MulExpr (("+" | "-") nl MulExpr)* }
+MulExpr { UnaryExpr (("*" | "//" | "/" | "%") nl UnaryExpr)* }
+UnaryExpr { ("-" | "+") nl UnaryExpr | PowExpr }
+PowExpr { PostfixExpr ("**" nl UnaryExpr)? }
+PostfixExpr { primary postfix* }
+postfix { Field | Index | Call }
+Field { "." Identifier }
+Index { BracketL expression BracketR }
+Call { ParenL args? ParenR BlockArg? }
+
+primary {
+  Number | Float | String | TripleString | Bytes |
+  kw<"true"> | kw<"false"> | kw<"nil"> |
+  Identifier |
+  List | Dict | Paren |
+  AnonFn | IfExpr | TryExpr
+}
+
+List { BracketL listItems? BracketR }
+listItems { expression (commaNl expression)* commaNl? }
+Dict { BraceL dictEntries? BraceR }
+dictEntries { DictEntry (commaNl DictEntry)* commaNl? }
+// A bareword key (`name:`) vs a computed key (`(expr):`) is an engine distinction; both
+// parse as an expression key here. (No `nl` after `:` — `:` is not a continuation trigger,
+// §3.2, and it only ever occurs inside brackets where newlines are already insignificant.)
+DictEntry { expression ":" expression }
+Paren { ParenL expression ParenR }
+// Argument order is not enforced here: the engine rejects a positional argument after a
+// keyword argument at parse (an engine-only check the CFG omits, like lvalue validity).
+args { arg (commaNl arg)* commaNl? }
+arg { Identifier ":" expression | expression }
+// KNOWN GAP: block *parameters* (`do (x, y) … end`, App A) are not yet parsed — the
+// `(…)` after `do` is genuinely ambiguous with a parenthesized first body expression and
+// needs GLR/cut handling. The demo's blocks take no params (`repeat(n) do … end`). Tracked
+// for a follow-up; the parity corpus excludes block-parameter forms until then.
+BlockArg { kw<"do"> Body kw<"end"> }
+
+// `else if …` is an elif clause; a final `else` whose body *opens* with a bare `if` would
+// collide with it (an LR generator can't do the unbounded lookahead a hand parser uses to
+// tell one-`end` elif from two-`end` nesting). Doodle's rule is greedy — `else if` is
+// always an elif — so the elif branch takes any `else if`, and the final-`else` body's
+// FIRST statement may not begin with a bare `if` (`elseFirstStmt`, via the no-leading-`if`
+// `nc*` ladder). The two branches are then disjoint on the token after `else`, deep elif
+// chains stay linear and deterministic, and a nested `if` as the else body's first item
+// must be parenthesised or follow another statement (matching the engine's greediness).
+// `else` is optional (a bare `if c then B end`); a value-position if needing an else is an
+// engine check, and a bare `if`/`try` reaches statement position via AssignOrExpr.
+IfExpr { kw<"if"> expression kw<"then"> Body elseSection }
+elseSection { kw<"end"> | kw<"else"> afterElse }
+afterElse { kw<"if"> expression kw<"then"> Body elseSection | elseFinalBody kw<"end"> }
+// The final-`else` body, matching the engine's separator rule (probed: `else if` adjacent
+// is an elif; `else`+separator+`if` is a nested if-statement in the else body):
+//   - a separator right after `else` (`else` on its own line): a full body, so a nested
+//     `if` (with its own `end`) as the first statement is allowed;
+//   - same line as `else` (`else 5`, `else return`): the first statement may not start with
+//     a bare `if` (that adjacency is the elif branch above).
+// Both use the trailing-seps-absorbed shape of `separated` (no double `sep*`).
+elseFinalBody {
+  sep+ (statement sep+)* statement?
+  | (elseFirstStmt (sep+ (statement sep+)* statement?)?)?
+}
+// Every statement, but a bare expression-statement uses `ncExpr` (no leading `if`). `try`
+// stays allowed — only `else if` is the elif collision, so `else try …` is unambiguous.
+elseFirstStmt {
+  LetStmt | ConstStmt |
+  WhileStmt | LoopStmt | WithStmt |
+  ReturnStmt | BreakStmt | ContinueStmt | RaiseStmt |
+  ToDecl | FnDecl |
+  RecordDecl | ProtocolDecl | ImplementDecl |
+  ModuleDecl | ParameterDecl |
+  ImportStmt | ExportsStmt |
+  ncExpr ("=" expression)?
+}
+TryExpr { kw<"try"> Body kw<"rescue"> Identifier Body kw<"end"> }
+
+// A no-leading-`if` copy of the expression ladder: identical to `expression` except its
+// leftmost leaf (`primaryNoIf`) excludes `IfExpr`. Only the left spine differs — right
+// operands and nested positions use the full `expression`, so `not`/`-` prefixes and any
+// bracketed or non-leading `if` still parse.
+ncExpr { ncOr }
+ncOr { ncAnd (kw<"or"> nl AndExpr)* }
+ncAnd { ncNot (kw<"and"> nl NotExpr)* }
+ncNot { kw<"not"> NotExpr | ncCmp }
+ncCmp { ncAdd (CmpOp nl AddExpr)? }
+ncAdd { ncMul (("+" | "-") nl MulExpr)* }
+ncMul { ncUnary (("*" | "//" | "/" | "%") nl UnaryExpr)* }
+ncUnary { ("-" | "+") nl UnaryExpr | ncPow }
+ncPow { ncPostfix ("**" nl UnaryExpr)? }
+ncPostfix { primaryNoIf postfix* }
+primaryNoIf {
+  Number | Float | String | TripleString | Bytes |
+  kw<"true"> | kw<"false"> | kw<"nil"> |
+  Identifier |
+  List | Dict | Paren |
+  AnonFn | TryExpr
+}
+
+// A no-trailing-block copy of the expression ladder for `while`/`with` headers (S-4,
+// §6.4/§7.6): identical to `expression` except a call takes no block argument (hCall). The
+// `primary` leaves are shared — a block *is* allowed inside brackets there, matching the
+// engine re-enabling block args inside an argument list.
+headerExpr { hOr }
+hOr { hAnd (kw<"or"> nl hAnd)* }
+hAnd { hNot (kw<"and"> nl hNot)* }
+hNot { kw<"not"> hNot | hCmp }
+hCmp { hAdd (CmpOp nl hAdd)? }
+hAdd { hMul (("+" | "-") nl hMul)* }
+hMul { hUnary (("*" | "//" | "/" | "%") nl hUnary)* }
+hUnary { ("-" | "+") nl hUnary | hPow }
+hPow { hPostfix ("**" nl hUnary)? }
+hPostfix { primary hPostfixItem* }
+hPostfixItem { Field | Index | hCall }
+hCall { ParenL args? ParenR }
+
+// A run of newlines that continues a statement across physical lines, placed right after a
+// continuation-trigger token — a binary/unary/word operator or a comma (§3.2). (Not after
+// `:`, `.`, `=`, or `not`, which do not trigger continuation.)
+nl { newline* }
+commaNl { "," nl }
+
+// An identifier node — the `identifier` token that is not a specialized keyword (§3.5).
+Identifier { identifier }
+
+// Keyword helper: carve a reserved word out of the identifier token so `if` is never an
+// Identifier (§3.5).
+kw<term> { @specialize[@name={term}]<identifier, term> }
+
+@skip { space | LineComment | newlineBracketed }
+
+@tokens {
+  space { $[ \t\f\r]+ }
+  LineComment { "#" ![\n\r]* }
+
+  identifier { idStart idChar* }
+  idStart { $[a-zA-Z_] | $[À-￿] }
+  idChar { idStart | $[0-9] }
+
+  // Numbers (§3.6.1/§3.6.2). A float needs digits on both sides of the point, or an
+  // exponent; otherwise it is an integer. Ordered so float wins when it applies.
+  Float {
+    dec "." dec (("e" | "E") ("+" | "-")? dec)? |
+    dec ("e" | "E") ("+" | "-")? dec
+  }
+  Number {
+    "0x" hex ("_"? hex)* |
+    "0b" $[01] ("_"? $[01])* |
+    "0o" $[0-7] ("_"? $[0-7])* |
+    dec
+  }
+  dec { $[0-9] ("_"? $[0-9])* }
+  hex { $[0-9a-fA-F] }
+
+  // KNOWN GAP: strings/bytes are tokenized coarsely — the grammar does not validate
+  // interpolation (`{expr}`), escape sequences (`\q`, malformed `\x`/`\u`), or triple-string
+  // margins, all of which the engine reports as static errors (L§3.6). So the Lezer grammar
+  // is *lenient* on those (e.g. it accepts an empty interpolation `"{}"`); the editor simply
+  // doesn't flag them (a false negative, not a false positive on valid code). The parity
+  // corpus excludes these string-internal error cases; validating them is a follow-up.
+  String { '"' (!["\\\n\r] | "\\" _)* '"' }
+  TripleString { '"""' tripleContent* '"""' }
+  tripleContent { ![\\"] | "\"" !["] | "\"\"" !["] | "\\" _ }
+  Bytes { "b\"" (!["\\\n\r] | "\\" _)* '"' }
+
+  ImportWildcard { "." "*" }
+
+  ParenL { "(" }
+  ParenR { ")" }
+  BracketL { "[" }
+  BracketR { "]" }
+  BraceL { "{" }
+  BraceR { "}" }
+
+  "**" "//" "==" "!=" "<=" ">=" "<" ">" "+" "-" "*" "/" "%" "="
+  "." "," ":" ";"
+
+  @precedence { TripleString, String, Bytes }
+  // `b"…"` beats an identifier starting with `b` (a bare `b` still lexes as an identifier,
+  // since Bytes needs the following `"`).
+  @precedence { Bytes, identifier }
+  @precedence { Float, Number }
+  @precedence { ImportWildcard, "." }
+  @precedence { "**", "*" }
+  @precedence { "//", "/" }
+}

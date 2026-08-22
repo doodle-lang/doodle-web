@@ -1,0 +1,31 @@
+{
+  "name": "@doodle-lang/lezer-doodle",
+  "version": "0.0.0",
+  "description": "A Lezer grammar for the Doodle language: editor syntax highlighting and the §6.4 grammar-parity gate (the grammar and the engine parser must classify a shared corpus identically).",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build:grammar": "mkdir -p dist && lezer-generator src/doodle.grammar -o dist/parser.js && cp src/tokens.js dist/tokens.js && cp src/parser.d.ts dist/parser.d.ts",
+    "build": "npm run build:grammar && tsc -p tsconfig.json",
+    "typecheck": "npm run build:grammar && tsc -p tsconfig.json --noEmit",
+    "test": "npm run build:grammar && node --test"
+  },
+  "dependencies": {
+    "@lezer/lr": "^1.4.0",
+    "@lezer/highlight": "^1.2.0"
+  },
+  "devDependencies": {
+    "@lezer/generator": "^1.7.0",
+    "typescript": "^5.7.0"
+  }
+}

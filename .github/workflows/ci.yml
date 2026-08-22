@@ -54,6 +54,6 @@ jobs:
       - name: Typecheck
         working-directory: doodle-web
         run: npm run typecheck
-      - name: Test (pump + conformance-through-wasm + turtle rendering)
+      - name: Test (pump + conformance-through-wasm + turtle rendering + grammar-parity)
         working-directory: doodle-web
         run: npm test
