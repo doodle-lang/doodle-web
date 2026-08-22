@@ -136,3 +136,24 @@ test('an uncaught raise surfaces as a raised outcome with its kind', async () =>
   assert.equal(outcome.exceptionKind, 'division-by-zero');
   inst.free();
 });
+
+test('a stop that races a handler-throw faults Cancelled, not raised (S-23)', async () => {
+  // If a capability handler throws AND the stop signal is aborted on the same call, the
+  // pump cancels then resolves-WITH-RAISE. A pending cancel must win over the host raise:
+  // the run faults `cancelled`, not `raised` (E§10.1 S-23 — the engine's raise arm reaps
+  // the cancel instead of surfacing the rejection).
+  await loadEngine(wasmBytes);
+  const inst = DoodleInstance.turtle('forward(1)\nforward(1)\n');
+  const controller = new AbortController();
+  const outcome = await pump(inst, {
+    scheduler,
+    signal: controller.signal,
+    onCapability: () => {
+      controller.abort(); // stop pressed...
+      throw new Error('host boom'); // ...as the handler also fails, on the same call
+    },
+  });
+  assert.equal(outcome.kind, 'faulted');
+  assert.equal(outcome.fault, 'cancelled', 'cancel wins over the racing raise');
+  inst.free();
+});
