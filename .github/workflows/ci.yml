@@ -45,9 +45,15 @@ jobs:
       - name: Install JS deps
         working-directory: doodle-web
         run: npm ci
+      # Build every package before typecheck/test: @doodle-lang/turtle imports the built
+      # @doodle-lang/engine (its dist .d.ts + .js), so engine must exist first. npm runs
+      # workspaces in directory order (engine before turtle).
+      - name: Build all packages
+        working-directory: doodle-web
+        run: npm run build --workspaces --if-present
       - name: Typecheck
         working-directory: doodle-web
-        run: npm run typecheck --workspace @doodle-lang/engine
-      - name: Test (pump + conformance-through-wasm)
+        run: npm run typecheck
+      - name: Test (pump + conformance-through-wasm + turtle rendering)
         working-directory: doodle-web
-        run: npm test --workspace @doodle-lang/engine
+        run: npm test

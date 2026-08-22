@@ -1,0 +1,28 @@
+{
+  "name": "@doodle-lang/turtle",
+  "version": "0.0.0",
+  "description": "Doodle turtle graphics for the browser: a canvas renderer and animated capability handlers over @doodle-lang/engine.",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test"
+  },
+  "dependencies": {
+    "@doodle-lang/engine": "*"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}
