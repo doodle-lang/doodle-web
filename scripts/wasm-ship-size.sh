@@ -2,11 +2,11 @@
 # Byte-exact wasm size gate on the SHIPPED artifact (implementation-plan §6.5): brotli-
 # compresses packages/engine/wasm/doodle_wasm_bg.wasm — the exact bytes build-wasm.sh
 # emits, which the demo bundles and @doodle-lang/engine ships — and fails if it exceeds the
-# ≤ 300 KB brotli budget. build-wasm.sh ships the raw wasm-bindgen output (no wasm-opt — see
-# its header for why), so this gate measures precisely what users download: what ships is
-# what is gated. (doodle-rust's scripts/wasm-size.sh separately measures a wasm-opt'd recipe
-# at the engine-crate level as a size-headroom signal; THIS gate is the one on the actual
-# shipped bytes, so the deploy path itself is gated.)
+# ≤ 300 KB brotli budget. build-wasm.sh emits the `wasm-opt -Oz` artifact, so this gate
+# measures precisely what users download: what ships is what is gated. (doodle-rust's
+# scripts/wasm-size.sh separately measures the same recipe at the engine-crate level as a
+# size-headroom signal; THIS gate is the one on the actual shipped bytes, so the deploy
+# path itself is gated.)
 #
 # Fail-closed: a missing/empty artifact, a missing brotli, or an unmeasurable result aborts
 # rather than passing — a size gate that greens on a broken pipeline is worse than none.

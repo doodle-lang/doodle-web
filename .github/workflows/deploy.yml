@@ -45,9 +45,11 @@ jobs:
           ver=$(awk '/^name = "wasm-bindgen"$/{f=1} f && /^version = /{gsub(/[",]/,"",$3); print $3; exit}' Cargo.lock)
           [ -n "$ver" ] || { echo "no wasm-bindgen entry in Cargo.lock"; exit 1; }
           cargo install wasm-bindgen-cli --version "$ver" --locked
-      - name: Install brotli (for the shipped-wasm size gate)
-        run: sudo apt-get update && sudo apt-get install -y brotli
-      - name: Build the wasm engine
+      - name: Install pinned binaryen (wasm-opt) + brotli
+        run: |
+          sudo apt-get update && sudo apt-get install -y brotli
+          doodle-web/scripts/install-binaryen.sh
+      - name: Build the wasm engine (wasm-opt -Oz)
         working-directory: doodle-web
         run: ./scripts/build-wasm.sh
       - name: Gate the shipped wasm on the ≤ 300 KB brotli budget (exact bytes)
@@ -67,6 +69,13 @@ jobs:
           npm run build -w @doodle-lang/engine
           npm run build -w @doodle-lang/turtle -w @doodle-lang/lezer-doodle
           npm run build -w @doodle-lang/demo
+      # Smoke-test the OPTIMIZED wasm before publishing: the engine suite drives turtle
+      # programs (draw_line capabilities) through the exact shipped bytes, so a wasm-opt
+      # miscompilation (e.g. the growable-table `Table.grow()` failure) fails the deploy
+      # here instead of shipping a broken demo. This is the safety net for the wasm-opt pass.
+      - name: Smoke-test the optimized wasm (engine suite through the shipped bytes)
+        working-directory: doodle-web
+        run: npm test -w @doodle-lang/engine
       - name: Build the demo app (project-pages base path)
         working-directory: doodle-web
         run: npm run build:app -w @doodle-lang/demo -- --base=/doodle-web/
