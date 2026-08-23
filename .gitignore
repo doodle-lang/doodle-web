@@ -2,5 +2,8 @@ node_modules/
 dist/
 # Generated wasm-bindgen artifact (rebuilt from doodle-rust via scripts/build-wasm.sh)
 packages/engine/wasm/
+# Playwright browser-test artifacts
+test-results/
+playwright-report/
 *.log
 .DS_Store

@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- No JS eval (§3.9): the Lezer parser is a static table and nothing uses eval/new
+         Function. `wasm-unsafe-eval` only permits WebAssembly compilation, not JS eval. The
+         production CSP is set via HTTP headers at deploy (M3.8); this meta is a dev aid. -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data:; connect-src 'self'"
+    />
+    <title>Doodle</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Doodle</h1>
+      <div class="controls">
+        <button id="run" type="button">Run ▸</button>
+        <button id="stop" type="button">Stop ◼</button>
+        <span id="status" data-kind=""></span>
+      </div>
+    </header>
+    <main>
+      <section class="pane editor-pane">
+        <div id="editor"></div>
+        <pre id="output" aria-label="output"></pre>
+      </section>
+      <section class="pane canvas-pane">
+        <canvas id="canvas" width="600" height="600"></canvas>
+      </section>
+    </main>
+    <footer>
+      <!-- Decision #9 (R8): a single unbounded op (e.g. a huge `**`) can briefly freeze the
+           tab; it then hits the heap limit. Documented; the real fix (a mid-computation
+           bignum-size cap) is deferred. -->
+      A very large single computation (like a huge <code>**</code>) can freeze the page for a
+      moment before it stops itself.
+    </footer>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

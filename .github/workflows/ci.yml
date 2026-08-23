@@ -45,15 +45,27 @@ jobs:
       - name: Install JS deps
         working-directory: doodle-web
         run: npm ci
-      # Build every package before typecheck/test: @doodle-lang/turtle imports the built
-      # @doodle-lang/engine (its dist .d.ts + .js), so engine must exist first. npm runs
-      # workspaces in directory order (engine before turtle).
-      - name: Build all packages
+      # Build in dependency order: turtle imports engine's built dist, and demo imports all
+      # three libs' dist — so engine first, then turtle/lezer-doodle, then demo (npm's
+      # default --workspaces order is alphabetical, which would build demo first).
+      - name: Build packages
         working-directory: doodle-web
-        run: npm run build --workspaces --if-present
+        run: |
+          npm run build -w @doodle-lang/engine
+          npm run build -w @doodle-lang/turtle -w @doodle-lang/lezer-doodle
+          npm run build -w @doodle-lang/demo
       - name: Typecheck
         working-directory: doodle-web
         run: npm run typecheck
-      - name: Test (pump + conformance-through-wasm + turtle rendering + grammar-parity)
+      - name: Test (pump + conformance-through-wasm + turtle + grammar-parity + demo core)
         working-directory: doodle-web
         run: npm test
+
+      # The demo's browser smoke (Playwright): builds the static app and drives it in
+      # headless Chromium — the editor mounts, Run draws, Stop halts.
+      - name: Install Playwright Chromium
+        working-directory: doodle-web
+        run: npx playwright install --with-deps chromium
+      - name: Browser smoke (demo)
+        working-directory: doodle-web
+        run: npm run test:browser -w @doodle-lang/demo
