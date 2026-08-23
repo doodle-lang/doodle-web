@@ -2,9 +2,9 @@
 # Fails if the demo app's first-load payload exceeds the ≤ 2 s-first-load budget proxy
 # (implementation-plan §6.5). Measures gzip — what GitHub Pages serves — over the whole
 # built site (packages/demo/dist/app). The wasm binary is *also* gated, separately and more
-# tightly, by doodle-rust's brotli size gate; this is the holistic page transfer, a portable
-# stand-in for the real "≤ 2 s on a mid-range Chromebook" check (which stays a manual
-# Lighthouse spot-check, since CI hardware is not a Chromebook).
+# tightly, by scripts/wasm-ship-size.sh (brotli, on the exact shipped bytes); this is the
+# holistic page transfer, a portable stand-in for the real "≤ 2 s on a mid-range Chromebook"
+# check (which stays a manual Lighthouse spot-check, since CI hardware is not a Chromebook).
 #
 # Usage: build the app first (`npm run build:app -w @doodle-lang/demo`), then run this.
 set -eu
