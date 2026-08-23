@@ -61,8 +61,22 @@ jobs:
         working-directory: doodle-web
         run: npm test
 
-      # The demo's browser smoke (Playwright): builds the static app and drives it in
-      # headless Chromium — the editor mounts, Run draws, Stop halts.
+      # Build the demo static site, then the M3.8 release gates on it.
+      - name: Build the demo app
+        working-directory: doodle-web
+        run: npm run build:app -w @doodle-lang/demo
+      - name: First-load budget (≤ 2 s proxy, §6.5)
+        working-directory: doodle-web
+        run: ./scripts/first-load-budget.sh
+      - name: Privacy posture (D-7: self-contained, meta CSP, no trackers)
+        working-directory: doodle-web
+        run: ./scripts/posture-check.sh
+      - name: npm publish dry-run (@doodle-lang/engine — dry-run only, Decision #5)
+        working-directory: doodle-web
+        run: npm publish --dry-run -w @doodle-lang/engine
+
+      # The demo's browser smoke (Playwright): drives the static app in headless Chromium —
+      # the editor mounts, Run draws, Stop halts, the exec line highlights.
       - name: Install Playwright Chromium
         working-directory: doodle-web
         run: npx playwright install --with-deps chromium

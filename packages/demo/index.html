@@ -6,10 +6,7 @@
     <!-- No JS eval (§3.9): the Lezer parser is a static table and nothing uses eval/new
          Function. `wasm-unsafe-eval` only permits WebAssembly compilation, not JS eval. The
          production CSP is set via HTTP headers at deploy (M3.8); this meta is a dev aid. -->
-    <meta
-      http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data:; connect-src 'self'"
-    />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data:; connect-src 'self'" />
     <title>Doodle</title>
     <link rel="stylesheet" href="/src/style.css" />
   </head>
