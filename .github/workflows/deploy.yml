@@ -1,0 +1,82 @@
+name: Deploy demo to GitHub Pages
+
+# Builds the @doodle-lang/demo static site (with the /doodle-web/ project-pages base path)
+# and publishes it to GitHub Pages on every push to main. Decision #3 (RESOLVED): GitHub
+# Pages, unlisted, default subdomain — https://doodle-lang.github.io/doodle-web/.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time; never cancel an in-flight publish.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build + deploy the demo to Pages
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout doodle-web
+        uses: actions/checkout@v6
+        with:
+          path: doodle-web
+      - name: Checkout doodle-rust (wasm crate)
+        uses: actions/checkout@v6
+        with:
+          repository: doodle-lang/doodle-rust
+          path: doodle-rust
+
+      - name: Install the pinned Rust toolchain + wasm32 target
+        working-directory: doodle-rust
+        run: rustup toolchain install
+      - name: Install wasm-bindgen-cli (version matched to Cargo.lock)
+        working-directory: doodle-rust
+        run: |
+          ver=$(awk '/^name = "wasm-bindgen"$/{f=1} f && /^version = /{gsub(/[",]/,"",$3); print $3; exit}' Cargo.lock)
+          [ -n "$ver" ] || { echo "no wasm-bindgen entry in Cargo.lock"; exit 1; }
+          cargo install wasm-bindgen-cli --version "$ver" --locked
+      - name: Build the wasm engine
+        working-directory: doodle-web
+        run: ./scripts/build-wasm.sh
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install JS deps
+        working-directory: doodle-web
+        run: npm ci
+      - name: Build packages (engine → turtle/lezer-doodle → demo)
+        working-directory: doodle-web
+        run: |
+          npm run build -w @doodle-lang/engine
+          npm run build -w @doodle-lang/turtle -w @doodle-lang/lezer-doodle
+          npm run build -w @doodle-lang/demo
+      - name: Build the demo app (project-pages base path)
+        working-directory: doodle-web
+        run: npm run build:app -w @doodle-lang/demo -- --base=/doodle-web/
+
+      # Gate the publish on the posture + first-load budget — never ship a page that fails them.
+      - name: Verify privacy posture + first-load budget
+        working-directory: doodle-web
+        run: ./scripts/posture-check.sh && ./scripts/first-load-budget.sh
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: doodle-web/packages/demo/dist/app
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
