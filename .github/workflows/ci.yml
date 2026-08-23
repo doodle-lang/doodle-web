@@ -68,7 +68,7 @@ jobs:
       - name: First-load budget (≤ 2 s proxy, §6.5)
         working-directory: doodle-web
         run: ./scripts/first-load-budget.sh
-      - name: Privacy posture (D-7: self-contained, meta CSP, no trackers)
+      - name: Privacy posture (D-7 — self-contained, meta CSP, no trackers)
         working-directory: doodle-web
         run: ./scripts/posture-check.sh
       - name: npm publish dry-run (@doodle-lang/engine — dry-run only, Decision #5)
