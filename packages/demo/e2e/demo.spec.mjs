@@ -34,6 +34,20 @@ test('Run draws the turtle path and reports done', async ({ page }) => {
   await expect(page.locator('#output')).toContainText('done');
 });
 
+test('the page loads and runs with no console errors (CSP-clean)', async ({ page }) => {
+  const errors = [];
+  page.on('console', (m) => {
+    if (m.type() === 'error') errors.push(m.text());
+  });
+  page.on('pageerror', (e) => errors.push(String(e)));
+  await page.goto('/');
+  await page.locator('#run').click();
+  await expect(page.locator('#status')).toHaveText('done', { timeout: 20_000 });
+  // No CSP violations (e.g. a style-src too strict for CodeMirror's injected styles) or
+  // other page errors.
+  expect(errors, errors.join('\n')).toEqual([]);
+});
+
 test('the executing line is highlighted while running', async ({ page }) => {
   await page.goto('/');
   await page.locator('#run').click();

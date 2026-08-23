@@ -4,9 +4,12 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <!-- No JS eval (§3.9): the Lezer parser is a static table and nothing uses eval/new
-         Function. `wasm-unsafe-eval` only permits WebAssembly compilation, not JS eval. The
-         production CSP is set via HTTP headers at deploy (M3.8); this meta is a dev aid. -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self' data:; connect-src 'self'" />
+         Function. `script-src` stays strict — `wasm-unsafe-eval` only permits WebAssembly
+         compilation, not JS eval. `style-src` needs `'unsafe-inline'` because CodeMirror
+         injects its editor styles at runtime; styles can't execute code, so this does not
+         weaken the script posture. The stricter HTTP-header CSP (+ frame-ancestors) rides
+         with the deferred Cloudflare move (Decision #3); this meta is what Pages serves. -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'" />
     <title>Doodle</title>
     <link rel="stylesheet" href="/src/style.css" />
   </head>
