@@ -1,7 +1,8 @@
 // The fuel-sliced pump (implementation-plan AD6): drives a Doodle engine instance in
 // short fuel slices, yielding to the host event loop between them so the browser main
 // thread stays responsive; surfaces suspending capabilities as Promises; samples the
-// executing position once per slice for a line highlight; and stops between slices when
+// executing user-program position (per slice AND at each capability suspend) for a line
+// highlight; and stops between slices when
 // an AbortSignal fires. The SAME code runs in Node (CI, injected `setImmediate`) and the
 // browser (rAF/`setTimeout`) — only the scheduler differs, which is how CI certifies the
 // demo.
@@ -42,8 +43,9 @@ export interface PumpOptions {
   readonly onCapability?: CapabilityHandler;
   /** Receives newly-printed output (the delta since the last slice), decoded as UTF-8. */
   readonly onOutput?: (text: string) => void;
-  /** Receives the executing `[start, end)` byte span once per slice (or null at a boundary),
-   *  for a line highlight. */
+  /** Receives the executing `[start, end)` byte span (or null at a boundary), for a line
+   *  highlight — sampled once per slice AND at each capability suspend, so a capability-paced
+   *  program (the animated turtle, which suspends before any slice ends) still updates. */
   readonly onPosition?: (span: readonly [number, number] | null) => void;
   /** The stop button: checked between slices AND after each capability handler; when
    *  aborted, the drive is cancelled and the run ends `faulted` with `"cancelled"`. */
@@ -129,6 +131,10 @@ export async function pump(instance: DoodleInstance, options: PumpOptions = {}):
       const handles = Array.from(result.args ?? new BigUint64Array());
       result.free();
       flushOutput();
+      // Sample the executing position at each capability suspend (a `to` capability like the
+      // turtle's `draw_line` sits at its call site), not only at slice ends — so a paced,
+      // capability-driven program (the animated turtle) drives a live line highlight.
+      if (options.onPosition) options.onPosition(spanOf(instance.currentUserSpan()));
 
       let args: DoodleValue[];
       try {
@@ -168,7 +174,7 @@ export async function pump(instance: DoodleInstance, options: PumpOptions = {}):
     // position, yield to the host, then honor the stop button before driving the next slice.
     result.free();
     flushOutput();
-    if (options.onPosition) options.onPosition(spanOf(instance.currentSpan()));
+    if (options.onPosition) options.onPosition(spanOf(instance.currentUserSpan()));
     await new Promise<void>((resume) => scheduler(resume));
     if (options.signal?.aborted) instance.cancel();
     result = instance.drive(fuel);

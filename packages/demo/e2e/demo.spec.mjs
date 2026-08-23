@@ -34,6 +34,13 @@ test('Run draws the turtle path and reports done', async ({ page }) => {
   await expect(page.locator('#output')).toContainText('done');
 });
 
+test('the executing line is highlighted while running', async ({ page }) => {
+  await page.goto('/');
+  await page.locator('#run').click();
+  // The exec-line highlight tracks the running program (and clears when it finishes).
+  await expect(page.locator('.cm-execLine')).toBeVisible({ timeout: 10_000 });
+});
+
 test('Stop halts a running program mid-draw', async ({ page }) => {
   await page.goto('/');
   // The starter spiral animates for several seconds — click Run, then Stop while it's still

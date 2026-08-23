@@ -103,6 +103,11 @@ main {
   height: 100%;
 }
 
+/* The line currently executing, driven by the engine's per-frame position. */
+.cm-execLine {
+  background: #fff3c4;
+}
+
 #output {
   margin: 0;
   padding: 0.5rem 1rem;

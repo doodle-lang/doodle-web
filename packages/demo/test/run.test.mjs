@@ -49,6 +49,23 @@ test('runs a turtle program: draws its path and streams print output', async () 
   assert.equal(out, 'done\n');
 });
 
+test('onLine reports the user-program line of each turtle command (skipping the library)', async () => {
+  await loadEngine(wasmBytes);
+  const surface = new MockSurface();
+  const lines = [];
+  await runTurtleProgram('forward(20)\nright(90)\nforward(20)\n', {
+    surface,
+    frames: autoFrames,
+    speed: 25,
+    onLine: (line) => {
+      if (lines[lines.length - 1] !== line) lines.push(line); // dedup consecutive samples
+    },
+  });
+  // forward→draw_line (lines 1,3), right→set_turtle (line 2): the user's lines, not the
+  // turtle library's draw_line/set_turtle call sites.
+  assert.deepEqual(lines, [1, 2, 3]);
+});
+
 test('a load error is returned (not thrown) for the output pane', async () => {
   await loadEngine(wasmBytes);
   const surface = new MockSurface();

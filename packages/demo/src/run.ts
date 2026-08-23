@@ -22,10 +22,18 @@ export interface RunOptions {
   readonly signal?: AbortSignal;
   /** Receives `print` output as it streams. */
   readonly onOutput?: (text: string) => void;
-  /** Receives the executing `[start, end)` byte span once per slice (for a line highlight). */
-  readonly onPosition?: (span: readonly [number, number] | null) => void;
+  /** Receives the 1-based line of the user's program currently executing (or null when in
+   *  the prepended turtle library or at a boundary), for a live line highlight. */
+  readonly onLine?: (line: number | null) => void;
   /** Pen travel per animation frame (turtle units); forwarded to the handlers. */
   readonly speed?: number;
+}
+
+/** Count of `\n` bytes in `bytes[from, to)`. */
+function countNewlines(bytes: Uint8Array, from: number, to: number): number {
+  let count = 0;
+  for (let i = from; i < to; i += 1) if (bytes[i] === 10) count += 1;
+  return count;
 }
 
 /**
@@ -48,12 +56,28 @@ export async function runTurtleProgram(source: string, options: RunOptions): Pro
     ...(options.speed !== undefined ? { speed: options.speed } : {}),
   });
 
+  // Map the engine's module-relative byte span → a 1-based line in the *user's* program.
+  // The engine's spans index the full module (turtle prelude + program), so subtract the
+  // prelude's line count; a position inside the prelude reports null (nothing to highlight
+  // in the editor). Newlines are single bytes, so counting them is offset-encoding-safe.
+  let onPosition: ((span: readonly [number, number] | null) => void) | undefined;
+  const onLine = options.onLine;
+  if (onLine) {
+    const moduleBytes = new TextEncoder().encode(instance.source());
+    const preludeBytes = instance.preludeBytes();
+    const preludeLines = countNewlines(moduleBytes, 0, preludeBytes);
+    onPosition = (span) => {
+      if (!span || span[0] < preludeBytes) onLine(null);
+      else onLine(countNewlines(moduleBytes, 0, span[0]) + 1 - preludeLines);
+    };
+  }
+
   try {
     return await pump(instance, {
       ...(options.signal ? { signal: options.signal } : {}),
       onCapability: handlers.onCapability,
       ...(options.onOutput ? { onOutput: options.onOutput } : {}),
-      ...(options.onPosition ? { onPosition: options.onPosition } : {}),
+      ...(onPosition ? { onPosition } : {}),
     });
   } finally {
     instance.free();

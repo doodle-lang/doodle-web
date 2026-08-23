@@ -2,8 +2,9 @@
 // canvas, and Run/Stop buttons wired to the engine via the run core (src/run.ts). Only
 // thin DOM glue lives here — the run/pump/turtle wiring is Node-tested in test/run.test.mjs.
 
-import { EditorState } from '@codemirror/state';
-import { EditorView, keymap, lineNumbers, highlightActiveLine } from '@codemirror/view';
+import { EditorState, StateEffect, StateField } from '@codemirror/state';
+import { EditorView, keymap, lineNumbers, highlightActiveLine, Decoration } from '@codemirror/view';
+import type { DecorationSet } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { syntaxHighlighting, defaultHighlightStyle } from '@codemirror/language';
 import { doodle } from '@doodle-lang/lezer-doodle';
@@ -31,6 +32,28 @@ const $ = (id: string): HTMLElement => {
   return el;
 };
 
+// A line decoration that follows execution — set by `setExecLine` (a 1-based user-program
+// line, or null to clear). Driven by the run core's `onLine` while a program runs.
+const setExecLine = StateEffect.define<number | null>();
+const execLineMark = Decoration.line({ class: 'cm-execLine' });
+const execLineField = StateField.define<DecorationSet>({
+  create: () => Decoration.none,
+  update(deco, tr) {
+    let next = deco.map(tr.changes);
+    for (const effect of tr.effects) {
+      if (effect.is(setExecLine)) {
+        const line = effect.value;
+        next =
+          line !== null && line >= 1 && line <= tr.state.doc.lines
+            ? Decoration.set([execLineMark.range(tr.state.doc.line(line).from)])
+            : Decoration.none;
+      }
+    }
+    return next;
+  },
+  provide: (field) => EditorView.decorations.from(field),
+});
+
 function main(): void {
   const canvas = $('canvas') as HTMLCanvasElement;
   const ctx = canvas.getContext('2d');
@@ -48,6 +71,7 @@ function main(): void {
         lineNumbers(),
         history(),
         highlightActiveLine(),
+        execLineField,
         keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
         doodle(),
         syntaxHighlighting(defaultHighlightStyle),
@@ -106,12 +130,14 @@ function main(): void {
         onOutput: (text) => {
           output.textContent += text;
         },
+        onLine: (line) => editor.dispatch({ effects: setExecLine.of(line) }),
       });
       showResult(result);
     } catch (err) {
       setStatus('error', 'error');
       output.textContent += String(err instanceof Error ? err.message : err);
     } finally {
+      editor.dispatch({ effects: setExecLine.of(null) }); // clear the exec highlight
       controller = null;
       runButton.disabled = false;
       stopButton.disabled = true;
