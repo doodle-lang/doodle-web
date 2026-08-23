@@ -189,7 +189,11 @@ function decodeValue(instance: DoodleInstance, handle: bigint): DoodleValue {
     case 'bool':
       return instance.asBool(handle);
     case 'int':
-      return instance.asInt(handle);
+      // Read the integer as decimal text, then build a JS bigint — total over any
+      // magnitude. `asInt` returns a host i64 and THROWS on a bignum (L§4.2 integers are
+      // arbitrary-precision), which would escape the decode and leave the instance wedged
+      // Suspended; `asIntStr` carries any magnitude across the boundary.
+      return BigInt(instance.asIntStr(handle));
     case 'float':
       return instance.asFloat(handle);
     case 'string':
@@ -205,7 +209,9 @@ function decodeValue(instance: DoodleInstance, handle: bigint): DoodleValue {
 function encodeValue(instance: DoodleInstance, value: DoodleValue): bigint {
   if (value === null) return instance.makeNil();
   if (typeof value === 'boolean') return instance.makeBool(value);
-  if (typeof value === 'bigint') return instance.makeInt(value);
+  // Intern via decimal text so a bignum result (beyond i64) is total, mirroring the
+  // decode; `makeInt` takes a host i64 and would throw on a larger magnitude.
+  if (typeof value === 'bigint') return instance.makeIntStr(value.toString());
   if (typeof value === 'number') return instance.makeFloat(value);
   if (typeof value === 'string') return instance.makeString(value);
   throw new Error(`cannot resolve a capability with value of type ${typeof value}`);

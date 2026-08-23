@@ -137,6 +137,29 @@ test('an uncaught raise surfaces as a raised outcome with its kind', async () =>
   inst.free();
 });
 
+test('a bignum capability argument decodes to a JS bigint, not a wedge', async () => {
+  // A Doodle integer is arbitrary-precision (L§4.2). `pencolor(r,g,b)` stores its channels
+  // and `forward` passes them to `draw_line`, so a huge `r` arrives as a bignum capability
+  // argument (beyond i64). The decode must carry it as a JS bigint and the run must reach a
+  // terminal state — before the total int boundary, the i64 reader threw out of the pump and
+  // left the instance stuck Suspended (the M3.9 review finding).
+  await loadEngine(wasmBytes);
+  const huge = 10n ** 30n;
+  const inst = DoodleInstance.turtle(`pencolor(${huge}, 0, 0)\nforward(1)\n`);
+  let seen;
+  const outcome = await pump(inst, {
+    scheduler,
+    onCapability: (call) => {
+      if (call.capability === 3) seen = call.args[4]; // draw_line: [x0,y0,x1,y1,r,g,b,a]
+      return undefined;
+    },
+  });
+  assert.equal(outcome.kind, 'completed', 'the run terminates instead of wedging');
+  assert.equal(typeof seen, 'bigint');
+  assert.equal(seen, huge, 'the bignum crosses the boundary intact');
+  inst.free();
+});
+
 test('a stop that races a handler-throw faults Cancelled, not raised (S-23)', async () => {
   // If a capability handler throws AND the stop signal is aborted on the same call, the
   // pump cancels then resolves-WITH-RAISE. A pending cancel must win over the host raise:
