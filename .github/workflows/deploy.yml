@@ -45,9 +45,9 @@ jobs:
           ver=$(awk '/^name = "wasm-bindgen"$/{f=1} f && /^version = /{gsub(/[",]/,"",$3); print $3; exit}' Cargo.lock)
           [ -n "$ver" ] || { echo "no wasm-bindgen entry in Cargo.lock"; exit 1; }
           cargo install wasm-bindgen-cli --version "$ver" --locked
-      - name: Install binaryen (wasm-opt) + brotli
-        run: sudo apt-get update && sudo apt-get install -y binaryen brotli
-      - name: Build the wasm engine (wasm-bindgen + wasm-opt -Oz)
+      - name: Install brotli (for the shipped-wasm size gate)
+        run: sudo apt-get update && sudo apt-get install -y brotli
+      - name: Build the wasm engine
         working-directory: doodle-web
         run: ./scripts/build-wasm.sh
       - name: Gate the shipped wasm on the ≤ 300 KB brotli budget (exact bytes)
