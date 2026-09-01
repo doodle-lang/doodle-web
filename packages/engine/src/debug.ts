@@ -38,8 +38,24 @@ export interface StackFrame {
   readonly locals: readonly string[];
   /** `with`-established dynamic-parameter names in this frame (empty for an elided frame). */
   readonly dynamics: readonly string[];
+  /** The frame's home module index (E§8.2) — pass to {@link moduleGlobals} for the module's
+   *  variables (shown once per module). Absent on an elided frame. */
+  readonly module?: number;
   /** `true` if this is a tail-elided caller (E§8.3), not a live activation. */
   readonly elided?: boolean;
+}
+
+/** A module-level declaration kind (E§8.2). The *variables* a debugger's panel shows are
+ *  `let`/`const`/`parameter`; the rest are the module's other declarations. */
+export type GlobalKind = 'let' | 'const' | 'parameter' | 'to' | 'fn' | 'record' | 'protocol' | 'module';
+
+/** A module-level binding (E§8.2): its name, declaration `kind` (the host filters to
+ *  `let`/`const`/`parameter` for a variables panel), and `slot` (the key for
+ *  {@link DoodleInstance.moduleGlobalValue}). Value read lazily and gen-gated, like frame bindings. */
+export interface GlobalBinding {
+  readonly name: string;
+  readonly kind: GlobalKind;
+  readonly slot: number;
 }
 
 /** The stack-walk result (E§8.2): the live frames (innermost first) then the tail-elided
@@ -79,4 +95,10 @@ export function breakpoints(instance: DoodleInstance): BreakpointInfo[] {
 /** Host-driven `to_string` on a value at a paused instance (E§8.4/S-22), typed. */
 export function evalToString(instance: DoodleInstance, handle: bigint, fuel: bigint): AuxResult {
   return instance.evalToString(handle, fuel) as unknown as AuxResult;
+}
+
+/** The module-level bindings of a frame's home `module` (E§8.2), typed — a top-level program's
+ *  variables live here, not in a frame's `locals`. */
+export function moduleGlobals(instance: DoodleInstance, module: number): GlobalBinding[] {
+  return instance.moduleGlobals(module) as unknown as GlobalBinding[];
 }
