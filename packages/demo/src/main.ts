@@ -1,6 +1,8 @@
-// The browser entry: mount a CodeMirror editor (with Doodle highlighting), a turtle
-// canvas, and Run/Stop buttons wired to the engine via the run core (src/run.ts). Only
-// thin DOM glue lives here — the run/pump/turtle wiring is Node-tested in test/run.test.mjs.
+// The browser entry: mount a CodeMirror editor (Doodle highlighting + a breakpoint gutter), a
+// turtle canvas, and the Run / Debug / Stop controls. Run animates a program to completion (the
+// run core, src/run.ts); Debug drives it under the engine's observation surface (the debug
+// controller, src/debug/) — breakpoints, stepping, and the call-stack / variables / value-tree /
+// raise-trap panels. Only thin DOM glue lives here; the run and debug cores are Node-tested.
 
 import { EditorState, StateEffect, StateField } from '@codemirror/state';
 import { EditorView, keymap, lineNumbers, highlightActiveLine, Decoration } from '@codemirror/view';
@@ -9,11 +11,15 @@ import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirro
 import { syntaxHighlighting, defaultHighlightStyle } from '@codemirror/language';
 import { doodle } from '@doodle-lang/lezer-doodle';
 import { loadEngine } from '@doodle-lang/engine';
-import { CanvasSurface } from '@doodle-lang/turtle';
 
 import { runTurtleProgram, type RunResult } from './run.js';
+import { breakpointGutter, breakpointLines } from './debug/gutter.js';
+import { DebugPanels } from './debug/panels.js';
+import { DebugController, canvasSurfaceFactory, type DebugState } from './debug/controller.js';
+import type { DebugDirective } from './debug/session.js';
 
-const STARTER = `# A growing spiral — press Run (⌘/Ctrl-Enter). Try changing the numbers!
+const STARTER = `# A growing spiral — Run (⌘/Ctrl-Enter) to animate, or Debug to step through.
+# Click the gutter (left of a line) to set a breakpoint ●, then press Debug.
 pencolor("blue")
 let side = 5
 let n = 0
@@ -33,7 +39,7 @@ const $ = (id: string): HTMLElement => {
 };
 
 // A line decoration that follows execution — set by `setExecLine` (a 1-based user-program
-// line, or null to clear). Driven by the run core's `onLine` while a program runs.
+// line, or null to clear). Driven by the run core's `onLine` and the debugger's paused line.
 const setExecLine = StateEffect.define<number | null>();
 const execLineMark = Decoration.line({ class: 'cm-execLine' });
 const execLineField = StateField.define<DecorationSet>({
@@ -58,10 +64,18 @@ function main(): void {
   const canvas = $('canvas') as HTMLCanvasElement;
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('no 2d canvas context');
+  const makeSurface = canvasSurfaceFactory(ctx, canvas.width, canvas.height);
   const output = $('output');
   const status = $('status');
   const runButton = $('run') as HTMLButtonElement;
+  const debugButton = $('debug') as HTMLButtonElement;
   const stopButton = $('stop') as HTMLButtonElement;
+  const debugBar = $('debug-bar');
+  const watchBox = $('watch') as HTMLInputElement;
+  const trapBox = $('trap') as HTMLInputElement;
+  const stepButtons = ['continue', 'step', 'into', 'over', 'out'].map((id) => $(id) as HTMLButtonElement);
+
+  const setExec = (line: number | null): void => editor.dispatch({ effects: setExecLine.of(line) });
 
   const editor = new EditorView({
     parent: $('editor'),
@@ -69,6 +83,7 @@ function main(): void {
       doc: STARTER,
       extensions: [
         lineNumbers(),
+        breakpointGutter((line) => debug.toggleBreakpoint(line)),
         history(),
         highlightActiveLine(),
         execLineField,
@@ -80,12 +95,71 @@ function main(): void {
     }),
   });
 
-  let controller: AbortController | null = null;
+  const panels = new DebugPanels($('debug-panels'));
 
   const setStatus = (text: string, kind = ''): void => {
     status.textContent = text;
     status.dataset['kind'] = kind;
   };
+
+  // --- Debug ---
+
+  let runController: AbortController | null = null;
+  let debugState: DebugState = 'idle';
+
+  const refreshButtons = (): void => {
+    const busy = runController !== null || debugState !== 'idle';
+    runButton.disabled = busy;
+    debugButton.disabled = busy;
+    stopButton.disabled = !busy;
+    debugBar.hidden = debugState === 'idle';
+    const panelsEl = $('debug-panels');
+    panelsEl.hidden = debugState !== 'paused';
+    for (const b of stepButtons) b.disabled = debugState !== 'paused';
+  };
+
+  const debug = new DebugController({
+    getSource: () => editor.state.doc.toString(),
+    getBreakpointLines: () => breakpointLines(editor),
+    watch: () => watchBox.checked,
+    trapRaises: () => trapBox.checked,
+    makeSurface,
+    frames: (cb) => window.requestAnimationFrame(cb),
+    panels,
+    setExecLine: setExec,
+    setStatus,
+    appendOutput: (text) => {
+      output.textContent += text;
+    },
+    clearOutput: () => {
+      output.textContent = '';
+    },
+    onState: (state) => {
+      debugState = state;
+      refreshButtons();
+    },
+  });
+
+  async function startDebug(): Promise<void> {
+    if (runController || debug.active) return;
+    setStatus('loading…', 'run');
+    try {
+      await loadEngine();
+      await debug.start();
+    } catch (err) {
+      setStatus('error', 'error');
+      output.textContent += String(err instanceof Error ? err.message : err);
+    }
+  }
+
+  debugButton.addEventListener('click', () => void startDebug());
+  for (const button of stepButtons) {
+    button.addEventListener('click', () => void debug.step(button.id as DebugDirective));
+  }
+  watchBox.addEventListener('change', () => debug.setWatch(watchBox.checked));
+  trapBox.addEventListener('change', () => debug.setTrapRaises(trapBox.checked));
+
+  // --- Run (animate to completion) ---
 
   const showResult = (result: RunResult): void => {
     switch (result.kind) {
@@ -107,46 +181,40 @@ function main(): void {
   };
 
   async function run(): Promise<void> {
-    if (controller) return; // already running
-    // Create the stop controller up front so a Stop pressed during engine load (or before
-    // the first slice) still cancels — `pump` honors an already-aborted signal.
-    controller = new AbortController();
-    runButton.disabled = true;
-    stopButton.disabled = false;
+    if (runController || debug.active) return;
+    runController = new AbortController();
+    refreshButtons();
     output.textContent = '';
     setStatus('running…', 'run');
     try {
-      await loadEngine(); // idempotent; the browser fetches the co-located wasm
-      const surface = new CanvasSurface({
-        ctx: ctx!,
-        width: canvas.width,
-        height: canvas.height,
-        background: '#ffffff',
-      });
+      await loadEngine();
+      const surface = makeSurface();
       const result = await runTurtleProgram(editor.state.doc.toString(), {
         surface,
         frames: (cb) => window.requestAnimationFrame(cb),
-        signal: controller.signal,
+        signal: runController.signal,
         onOutput: (text) => {
           output.textContent += text;
         },
-        onLine: (line) => editor.dispatch({ effects: setExecLine.of(line) }),
+        onLine: (line) => setExec(line),
       });
       showResult(result);
     } catch (err) {
       setStatus('error', 'error');
       output.textContent += String(err instanceof Error ? err.message : err);
     } finally {
-      editor.dispatch({ effects: setExecLine.of(null) }); // clear the exec highlight
-      controller = null;
-      runButton.disabled = false;
-      stopButton.disabled = true;
+      setExec(null);
+      runController = null;
+      refreshButtons();
     }
   }
 
   runButton.addEventListener('click', () => void run());
-  stopButton.addEventListener('click', () => controller?.abort());
-  stopButton.disabled = true;
+  stopButton.addEventListener('click', () => {
+    runController?.abort();
+    debug.stop();
+  });
+  refreshButtons();
 }
 
 main();

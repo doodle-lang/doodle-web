@@ -18,10 +18,20 @@
       <h1>Doodle</h1>
       <div class="controls">
         <button id="run" type="button">Run ▸</button>
+        <button id="debug" type="button">Debug ▸</button>
         <button id="stop" type="button">Stop ◼</button>
         <span id="status" data-kind=""></span>
       </div>
     </header>
+    <div id="debug-bar" class="controls" hidden>
+      <button id="continue" type="button" title="Continue">▶</button>
+      <button id="step" type="button" title="Step">↷</button>
+      <button id="into" type="button" title="Step into">⤵</button>
+      <button id="over" type="button" title="Step over">⤼</button>
+      <button id="out" type="button" title="Step out">⤴</button>
+      <label class="toggle"><input id="watch" type="checkbox" /> watch</label>
+      <label class="toggle"><input id="trap" type="checkbox" /> trap raises</label>
+    </div>
     <main>
       <section class="pane editor-pane">
         <div id="editor"></div>
@@ -29,6 +39,7 @@
       </section>
       <section class="pane canvas-pane">
         <canvas id="canvas" width="600" height="600"></canvas>
+        <div id="debug-panels" hidden aria-label="debugger"></div>
       </section>
     </main>
     <footer>

@@ -181,8 +181,10 @@ export async function pump(instance: DoodleInstance, options: PumpOptions = {}):
   }
 }
 
-/** Decodes a handle to a JS value by kind (scalars only at M3). Does not release it. */
-function decodeValue(instance: DoodleInstance, handle: bigint): DoodleValue {
+/** Decodes a handle to a JS value by kind (scalars only; a compound/foreign value is `null`).
+ *  Does not release the handle. Exposed for a directive-driving host (the debugger) that fulfils
+ *  capabilities itself. */
+export function decodeValue(instance: DoodleInstance, handle: bigint): DoodleValue {
   switch (instance.kindOf(handle)) {
     case 'nil':
       return null;
@@ -205,8 +207,9 @@ function decodeValue(instance: DoodleInstance, handle: bigint): DoodleValue {
   }
 }
 
-/** Interns a JS value as a fresh host-owned handle to resolve a capability with. */
-function encodeValue(instance: DoodleInstance, value: DoodleValue): bigint {
+/** Interns a JS value as a fresh host-owned handle to resolve a capability with. Exposed for a
+ *  directive-driving host (the debugger). */
+export function encodeValue(instance: DoodleInstance, value: DoodleValue): bigint {
   if (value === null) return instance.makeNil();
   if (typeof value === 'boolean') return instance.makeBool(value);
   // Intern via decimal text so a bignum result (beyond i64) is total, mirroring the
