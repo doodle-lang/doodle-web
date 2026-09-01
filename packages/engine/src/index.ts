@@ -7,6 +7,7 @@ import type { InitInput } from '../wasm/doodle_wasm.js';
 export { DoodleInstance, DriveResult, version };
 export type { InitInput };
 export * from './pump.js';
+export * from './debug.js';
 
 let ready: Promise<void> | undefined;
 

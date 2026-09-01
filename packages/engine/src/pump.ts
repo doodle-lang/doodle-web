@@ -96,7 +96,7 @@ export async function pump(instance: DoodleInstance, options: PumpOptions = {}):
   // A signal already aborted before the first slice cancels immediately.
   if (options.signal?.aborted) instance.cancel();
 
-  let result: DriveResult = instance.drive(fuel);
+  let result: DriveResult = instance.drive('run', fuel);
   for (;;) {
     const kind = result.kind;
 
@@ -177,7 +177,7 @@ export async function pump(instance: DoodleInstance, options: PumpOptions = {}):
     if (options.onPosition) options.onPosition(spanOf(instance.currentUserSpan()));
     await new Promise<void>((resume) => scheduler(resume));
     if (options.signal?.aborted) instance.cancel();
-    result = instance.drive(fuel);
+    result = instance.drive('run', fuel);
   }
 }
 
