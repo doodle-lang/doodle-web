@@ -28,6 +28,13 @@ export class DebugPanels {
     this.current = null;
   }
 
+  /** Shows a placeholder while a drive is in flight (there is no stable state to inspect), so the
+   *  panels region stays present and stably sized across the pause/run cycle. */
+  showRunning(): void {
+    this.current = null;
+    this.container.replaceChildren(section('Debugger', [muted('running… (pauses at a breakpoint or step)')]));
+  }
+
   /** Re-renders the panels from the session's current paused state. `stop` is the pause that
    *  produced it (its reason drives the raise-trap readout). Reset the frame selection when a
    *  new pause arrives (a different `stop` object), keep it on a same-pause re-render (a frame

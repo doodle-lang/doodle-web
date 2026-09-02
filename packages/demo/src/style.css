@@ -107,6 +107,12 @@ main {
 .cm-execLine {
   background: #fff3c4;
 }
+/* Executing *inside* a call from this line (a library/procedure whose source isn't shown): a
+   cooler tint + a left rule, so a step into `forward` reads as "running under here", not "on it". */
+.cm-execLine-under {
+  background: #e2ecfd;
+  box-shadow: inset 3px 0 0 var(--accent);
+}
 
 #output {
   margin: 0;
@@ -172,10 +178,12 @@ canvas {
   cursor: pointer;
 }
 
-/* The panels region, below the canvas — the call stack, variables, and value trees. */
+/* The panels region, below the canvas — the call stack, variables, and value trees. A fixed
+   share of the pane (not content-sized), so it stays put across the run/pause cycle; it scrolls
+   internally when its contents overflow. */
 #debug-panels {
   width: 100%;
-  flex: 1 1 auto;
+  flex: 0 0 42%;
   min-height: 0;
   overflow: auto;
   border: 1px solid var(--border);

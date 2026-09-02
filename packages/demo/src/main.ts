@@ -38,20 +38,24 @@ const $ = (id: string): HTMLElement => {
   return el;
 };
 
-// A line decoration that follows execution — set by `setExecLine` (a 1-based user-program
-// line, or null to clear). Driven by the run core's `onLine` and the debugger's paused line.
-const setExecLine = StateEffect.define<number | null>();
+// A line decoration that follows execution — set by `setExecLine` with a 1-based user-program
+// line (or null to clear) and an `under` flag: `under` means execution is *inside* a call from
+// that line (a library/procedure whose source is not shown), coloured differently so a step into
+// `forward` reads as "running under this line", not "stopped on it". Driven by the run core's
+// `onLine` and the debugger's paused line.
+const setExecLine = StateEffect.define<{ line: number | null; under: boolean }>();
 const execLineMark = Decoration.line({ class: 'cm-execLine' });
+const execUnderMark = Decoration.line({ class: 'cm-execLine cm-execLine-under' });
 const execLineField = StateField.define<DecorationSet>({
   create: () => Decoration.none,
   update(deco, tr) {
     let next = deco.map(tr.changes);
     for (const effect of tr.effects) {
       if (effect.is(setExecLine)) {
-        const line = effect.value;
+        const { line, under } = effect.value;
         next =
           line !== null && line >= 1 && line <= tr.state.doc.lines
-            ? Decoration.set([execLineMark.range(tr.state.doc.line(line).from)])
+            ? Decoration.set([(under ? execUnderMark : execLineMark).range(tr.state.doc.line(line).from)])
             : Decoration.none;
       }
     }
@@ -73,9 +77,17 @@ function main(): void {
   const debugBar = $('debug-bar');
   const watchBox = $('watch') as HTMLInputElement;
   const trapBox = $('trap') as HTMLInputElement;
+  const speedSlider = $('speed') as HTMLInputElement;
+  // The slider (1 = slow … 5 = fast) sets the turtle animation speed and a paced-continue delay.
+  // At full speed the delay is 0 (Continue runs in big slices, as before); slower settings drive
+  // one statement per slice with a delay, so every line highlights, not just the drawing ones.
+  const speedValue = (): number => Number(speedSlider.value);
+  const turtleSpeed = (): number => speedValue() * 10;
+  const paceMs = (): number => (speedValue() >= 5 ? 0 : (5 - speedValue()) * 50);
   const stepButtons = ['continue', 'step', 'into', 'over', 'out'].map((id) => $(id) as HTMLButtonElement);
 
-  const setExec = (line: number | null): void => editor.dispatch({ effects: setExecLine.of(line) });
+  const setExec = (line: number | null, under = false): void =>
+    editor.dispatch({ effects: setExecLine.of({ line, under }) });
 
   const editor = new EditorView({
     parent: $('editor'),
@@ -113,8 +125,9 @@ function main(): void {
     debugButton.disabled = busy;
     stopButton.disabled = !busy;
     debugBar.hidden = debugState === 'idle';
-    const panelsEl = $('debug-panels');
-    panelsEl.hidden = debugState !== 'paused';
+    // The panels region stays visible for the whole debug session (running and paused), so it
+    // does not appear/disappear jarringly; it shows a placeholder while a drive is in flight.
+    $('debug-panels').hidden = debugState === 'idle';
     for (const b of stepButtons) b.disabled = debugState !== 'paused';
   };
 
@@ -123,6 +136,8 @@ function main(): void {
     getBreakpointLines: () => breakpointLines(editor),
     watch: () => watchBox.checked,
     trapRaises: () => trapBox.checked,
+    turtleSpeed,
+    pace: paceMs,
     makeSurface,
     frames: (cb) => window.requestAnimationFrame(cb),
     panels,
@@ -158,6 +173,7 @@ function main(): void {
   }
   watchBox.addEventListener('change', () => debug.setWatch(watchBox.checked));
   trapBox.addEventListener('change', () => debug.setTrapRaises(trapBox.checked));
+  speedSlider.addEventListener('input', () => debug.setPace(paceMs()));
 
   // --- Run (animate to completion) ---
 
@@ -192,6 +208,7 @@ function main(): void {
       const result = await runTurtleProgram(editor.state.doc.toString(), {
         surface,
         frames: (cb) => window.requestAnimationFrame(cb),
+        speed: turtleSpeed(),
         signal: runController.signal,
         onOutput: (text) => {
           output.textContent += text;

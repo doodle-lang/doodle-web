@@ -21,14 +21,19 @@ export interface DebugDeps {
   readonly watch: () => boolean;
   /** Whether raise-trapping is enabled. */
   readonly trapRaises: () => boolean;
+  /** Turtle pen/turn speed (units per frame) for a debug run — read when a session starts. */
+  readonly turtleSpeed: () => number;
+  /** Per-statement delay (ms) for a paced `continue`; 0 runs full-speed. Read live. */
+  readonly pace: () => number;
   /** Builds the drawing surface (the demo wires a CanvasSurface; the test a mock). */
   readonly makeSurface: () => DrawingSurface;
   /** The animation clock. */
   readonly frames: FrameSource;
   /** The panels to render at a pause / clear at the end. */
   readonly panels: DebugPanels;
-  /** Sets the paused-line highlight (or null to clear). */
-  readonly setExecLine: (line: number | null) => void;
+  /** Sets the paused-line highlight (or null to clear). `under` marks executing *inside* a call
+   *  from that line (a library/procedure whose source is not shown), so the UI can colour it. */
+  readonly setExecLine: (line: number | null, under?: boolean) => void;
   /** Sets the status line. */
   readonly setStatus: (text: string, kind?: string) => void;
   /** Appends streamed output. */
@@ -65,7 +70,9 @@ export class DebugController {
         frames: this.deps.frames,
         signal: this.controller.signal,
         onOutput: this.deps.appendOutput,
-        speed: 40,
+        speed: this.deps.turtleSpeed(),
+        // A paced `continue` highlights each executing line as it runs (not only at pauses).
+        onLine: (line) => this.deps.setExecLine(line, false),
       });
     } catch (err) {
       this.deps.setStatus('error', 'error');
@@ -77,7 +84,13 @@ export class DebugController {
     for (const line of this.deps.getBreakpointLines()) session.toggleBreakpoint(line);
     session.setWatch(this.deps.watch());
     session.setRaiseTrap(this.deps.trapRaises());
+    session.setPace(this.deps.pace());
     await this.driveTo('continue');
+  }
+
+  /** Applies a live pace (per-statement delay, ms) to the session. */
+  setPace(ms: number): void {
+    this.session?.setPace(ms);
   }
 
   /** Drives one directive (from a step button) to the next stop. Valid only while paused. */
@@ -110,6 +123,7 @@ export class DebugController {
   private async driveTo(directive: DebugDirective): Promise<void> {
     if (!this.session) return;
     this.setState('running');
+    this.deps.panels.showRunning();
     this.deps.setStatus('debugging…', 'run');
     const stop = await this.session.run(directive);
     if (!this.session) return; // torn down while driving
@@ -118,7 +132,7 @@ export class DebugController {
 
   private handleStop(stop: DebugStop): void {
     if (stop.kind === 'paused') {
-      this.deps.setExecLine(stop.line);
+      this.deps.setExecLine(stop.line, stop.under);
       this.deps.panels.render(this.session!, stop);
       this.setState('paused');
       this.deps.setStatus(`paused · ${stop.reason}`, 'run');

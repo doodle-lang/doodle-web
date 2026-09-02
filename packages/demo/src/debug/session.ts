@@ -14,7 +14,7 @@ import type { DrawingSurface, FrameSource } from '@doodle-lang/turtle';
  *  rest are terminal (the session is spent — `free()` it). Positions are 1-based user-program
  *  lines (or null when in the prepended turtle library / at a boundary). */
 export type DebugStop =
-  | { readonly kind: 'paused'; readonly reason: PauseReason; readonly line: number | null }
+  | { readonly kind: 'paused'; readonly reason: PauseReason; readonly line: number | null; readonly under: boolean }
   | { readonly kind: 'completed' }
   | { readonly kind: 'raised'; readonly exceptionKind: string; readonly message: string; readonly line: number | null }
   | { readonly kind: 'faulted'; readonly fault: string };
@@ -39,6 +39,10 @@ export interface DebugSessionOptions {
   readonly onOutput?: (text: string) => void;
   /** Pen travel per animation frame (turtle units). */
   readonly speed?: number;
+  /** Receives the executing user line at each statement while a **paced** `continue` runs (see
+   *  {@link DebugSession.setPace}), for a live line highlight — so slowing a run makes every line
+   *  visible, not just the drawing ones. */
+  readonly onLine?: (line: number | null) => void;
 }
 
 const FUEL = 100_000n;
@@ -65,6 +69,8 @@ export class DebugSession {
   private readonly preludeLines: number;
   private readonly outputDecoder = new TextDecoder('utf-8');
   private outputSeen = 0;
+  /** Per-statement delay (ms) for a paced `continue`; 0 = full-speed slices. */
+  private pace = 0;
   /** editor (1-based user) line → engine breakpoint id, for the breakpoints set here. */
   private readonly breakpointIds = new Map<number, number>();
 
@@ -114,6 +120,13 @@ export class DebugSession {
     this.instance.setObservationMode(on);
   }
 
+  /** Sets the per-statement delay (ms) for a paced `continue`: 0 runs full-speed (big slices);
+   *  a positive value drives one statement per slice and pauses between them, highlighting each
+   *  user line via `onLine` — so a slow run shows every line, not only the drawing ones. */
+  setPace(ms: number): void {
+    this.pace = Math.max(0, ms);
+  }
+
   /** Maps a module-source `[start,end)` span to a 1-based **user-program** line, or null when
    *  the span is in the prepended turtle library (nothing to show in the editor). */
   userLineOf(span: readonly [number, number] | null): number | null {
@@ -134,7 +147,11 @@ export class DebugSession {
    */
   async run(directive: DebugDirective): Promise<DebugStop> {
     if (this.options.signal?.aborted) this.instance.cancel();
-    let result = this.instance.drive(directive, FUEL);
+    // Paced `continue` drives one statement per slice (fuel 1) and delays between them, sampling
+    // the executing line — so slowing the run highlights every statement, not just drawing ones.
+    const paced = this.pace > 0 && directive === 'continue';
+    const fuel = paced ? 1n : FUEL;
+    let result = this.instance.drive(directive, fuel);
     for (;;) {
       const kind = result.kind;
 
@@ -143,16 +160,18 @@ export class DebugSession {
         result.free();
         this.flushOutput();
         if (reason === 'slice-end') {
-          await new Promise<void>((resume) => this.scheduler(resume));
+          if (paced) this.options.onLine?.(this.currentLine());
+          await this.betweenSlices(paced);
           if (this.options.signal?.aborted) this.instance.cancel();
-          result = this.instance.drive(directive, FUEL);
+          result = this.instance.drive(directive, fuel);
           continue;
         }
-        return { kind: 'paused', reason: reason as PauseReason, line: this.pausedLine(reason) };
+        const { line, under } = this.pausedLocation(reason);
+        return { kind: 'paused', reason: reason as PauseReason, line, under };
       }
 
       if (kind === 'suspended') {
-        await this.fulfilCapability(result);
+        await this.fulfilCapability(result, fuel);
         // Resolve resumes under the directive in force (E§7.3); loop reads the new outcome.
         result = this.lastResolveResult!;
         continue;
@@ -193,9 +212,15 @@ export class DebugSession {
 
   private lastResolveResult: ReturnType<DoodleInstance['resolve']> | undefined;
 
-  /** Decodes a capability request's argument handles, runs the turtle handler, and resolves —
-   *  a thrown handler surfaces as a Doodle raise at the call site (E§7.5). */
-  private async fulfilCapability(result: ReturnType<DoodleInstance['drive']>): Promise<void> {
+  /** Yields between fuel slices: a paced delay (watch mode) or a scheduler macrotask. */
+  private betweenSlices(paced: boolean): Promise<void> {
+    if (paced) return new Promise<void>((resume) => setTimeout(resume, this.pace));
+    return new Promise<void>((resume) => this.scheduler(resume));
+  }
+
+  /** Decodes a capability request's argument handles, runs the turtle handler, and resolves under
+   *  `fuel` (E§7.5) — a thrown handler surfaces as a Doodle raise at the call site. */
+  private async fulfilCapability(result: ReturnType<DoodleInstance['drive']>, fuel: bigint): Promise<void> {
     const capability = result.capability!;
     const handles = Array.from(result.args ?? new BigUint64Array());
     result.free();
@@ -217,15 +242,25 @@ export class DebugSession {
       raise = true;
     }
     if (this.options.signal?.aborted) this.instance.cancel();
-    this.lastResolveResult = this.instance.resolve(handle, raise, FUEL);
+    this.lastResolveResult = this.instance.resolve(handle, raise, fuel);
     this.instance.release(handle);
   }
 
-  /** The paused line: at a fine (watch) stop the completed subexpression; else the user line. */
-  private pausedLine(reason: string): number | null {
-    if (reason === 'raise-trap') return this.userLineOf(spanOf(this.instance.trappedRaiseSpan()));
+  /** Where a pause highlights, and whether we are *under* that line. At a fine (watch) stop the
+   *  completed subexpression's line; else the innermost active line. `under` is true when the
+   *  actual executing position is inside a call (the prepended turtle library, or a called
+   *  procedure) whose source is not in the editor — the highlight then marks the user's call
+   *  site, and the UI colours it to say "executing inside this line's call". */
+  private pausedLocation(reason: string): { line: number | null; under: boolean } {
+    if (reason === 'raise-trap') {
+      return { line: this.userLineOf(spanOf(this.instance.trappedRaiseSpan())), under: false };
+    }
     const fine = this.userLineOf(spanOf(this.instance.completedSpan()));
-    return fine ?? this.currentLine();
+    if (fine !== null) return { line: fine, under: false };
+    const direct = this.userLineOf(spanOf(this.instance.currentSpan()));
+    if (direct !== null) return { line: direct, under: false };
+    const callSite = this.currentLine();
+    return { line: callSite, under: callSite !== null };
   }
 
   private flushOutput(final = false): void {

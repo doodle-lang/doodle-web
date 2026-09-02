@@ -56,11 +56,13 @@ export function createTurtleHandlers(options: TurtleHandlersOptions): TurtleHand
   const signal = options.signal;
   const speed = options.speed ?? DEFAULT_SPEED;
 
-  // The marker's heading and visibility persist across a `forward`: the library only
-  // updates them via `set_turtle` (turns, show/hide), and the turtle keeps facing its
-  // heading while it glides. `forward`'s `draw_line` carries no heading, so we remember it.
+  // The marker's heading, visibility, and position persist across capabilities: `forward`'s
+  // `draw_line` carries no heading, and a `set_turtle` that only changes the heading (a
+  // `right`/`left`/`setheading` turn) is animated as a rotation in place. `pos` tracks the last
+  // marker position so a turn (same position, new heading) is told from a teleport.
   let heading = 0;
   let visible = true;
+  let pos = { x: 0, y: 0 };
 
   async function animateForward(seg: LineSegment): Promise<void> {
     const dx = seg.x1 - seg.x0;
@@ -79,6 +81,18 @@ export function createTurtleHandlers(options: TurtleHandlersOptions): TurtleHand
       surface.setMarker({ x: seg.x0 + dx * t, y: seg.y0 + dy * t, heading, visible });
     }
     surface.endStroke(true);
+    pos = { x: seg.x1, y: seg.y1 };
+  }
+
+  // Rotate the marker in place from `heading` to `to` over frames (shortest angular direction).
+  async function animateTurn(to: number): Promise<void> {
+    const delta = shortestDegrees(to - heading);
+    const steps = Math.max(1, Math.ceil(Math.abs(delta) / Math.max(6, speed)));
+    for (let i = 1; i <= steps; i++) {
+      await waitFrame(frames, signal);
+      if (signal?.aborted) return;
+      surface.setMarker({ x: pos.x, y: pos.y, heading: heading + delta * (i / steps), visible });
+    }
   }
 
   async function onCapability(call: CapabilityCall): Promise<undefined> {
@@ -88,8 +102,15 @@ export function createTurtleHandlers(options: TurtleHandlersOptions): TurtleHand
         return undefined;
       case SET_TURTLE: {
         const marker = markerOf(call.args);
+        // A pure turn (same position, visible before and after, heading changed) animates; a
+        // teleport / pen show-hide applies instantly.
+        const inPlace = Math.abs(marker.x - pos.x) < 0.5 && Math.abs(marker.y - pos.y) < 0.5;
+        if (inPlace && visible && marker.visible && marker.heading !== heading) {
+          await animateTurn(marker.heading);
+        }
         heading = marker.heading;
         visible = marker.visible;
+        pos = { x: marker.x, y: marker.y };
         surface.setMarker(marker);
         return undefined;
       }
@@ -127,6 +148,12 @@ function waitFrame(frames: FrameSource, signal: AbortSignal | undefined): Promis
     // `FrameSource` is rAF-shaped with no cancel, which is fine for a one-shot.
     frames(finish);
   });
+}
+
+/** The signed shortest rotation, in degrees, congruent to `d` (in `[-180, 180]`) — so a turn
+ *  from 350° to 10° rotates +20°, not −340°. */
+function shortestDegrees(d: number): number {
+  return ((((d % 360) + 540) % 360) - 180);
 }
 
 /** Coerces a capability argument to a JS number — coords arrive as floats (`number`) and
