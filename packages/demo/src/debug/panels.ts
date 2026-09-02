@@ -6,7 +6,7 @@
 // released within it (see inspect.ts), so the DOM holds no live handles.
 
 import { stackWalk, moduleGlobals } from '@doodle-lang/engine';
-import type { DoodleInstance, StackFrame } from '@doodle-lang/engine';
+import type { DoodleInstance, StackFrame, GlobalBinding } from '@doodle-lang/engine';
 import { materializeValue, type ValueNode } from './inspect.js';
 import type { DebugSession, DebugStop } from './session.js';
 
@@ -42,7 +42,7 @@ export class DebugPanels {
 
     const panels: HTMLElement[] = [];
     panels.push(this.renderCallStack(session, walk.frames, live.length));
-    panels.push(this.renderVariables(inst, walk.generation, live[this.selectedFrame]));
+    panels.push(this.renderVariables(session, walk.generation, live[this.selectedFrame]));
     if (stop.kind === 'paused' && stop.reason === 'raise-trap') {
       panels.push(this.renderRaiseTrap(inst));
     }
@@ -80,8 +80,9 @@ export class DebugPanels {
     return section('Call stack', [el('ul', { class: 'stack' }, ...rows)]);
   }
 
-  private renderVariables(inst: DoodleInstance, generation: number, frame: StackFrame | undefined): HTMLElement {
+  private renderVariables(session: DebugSession, generation: number, frame: StackFrame | undefined): HTMLElement {
     if (!frame) return section('Variables', [muted('no frame')]);
+    const inst = session.instance;
     const groups: HTMLElement[] = [];
 
     const locals = frame.locals.map((name, slot) =>
@@ -96,10 +97,17 @@ export class DebugPanels {
 
     if (frame.module !== undefined) {
       const module = frame.module;
-      const globals = moduleGlobals(inst, module)
-        .filter((g) => VARIABLE_KINDS.has(g.kind))
-        .map((g) => binding(inst, `${g.name}`, tryHandle(() => inst.moduleGlobalValue(generation, module, g.slot)), g.kind));
-      if (globals.length) groups.push(varGroup('Module globals', globals));
+      const bindingFor = (g: GlobalBinding): HTMLElement =>
+        binding(inst, g.name, tryHandle(() => inst.moduleGlobalValue(generation, module, g.slot)), g.kind);
+      const variables = moduleGlobals(inst, module).filter((g) => VARIABLE_KINDS.has(g.kind));
+      // Separate the program's own top-level globals from a prepended library's (the turtle
+      // demo prepends its library into the entry module): a library global's declaration
+      // precedes the user program, so `userLineOf` maps it to null. Show the user's globals
+      // prominently; tuck the library's into a collapsed group so they don't crowd them out.
+      const mine = variables.filter((g) => session.userLineOf(g.declSpan) !== null);
+      const library = variables.filter((g) => session.userLineOf(g.declSpan) === null);
+      if (mine.length) groups.push(varGroup('Module globals', mine.map(bindingFor)));
+      if (library.length) groups.push(collapsedGroup(`Library globals (${library.length})`, library.map(bindingFor)));
     }
 
     if (!groups.length) groups.push(muted('no variables in scope'));
@@ -188,6 +196,14 @@ function section(title: string, body: HTMLElement[]): HTMLElement {
 
 function varGroup(title: string, rows: HTMLElement[]): HTMLElement {
   return el('div', { class: 'var-group' }, el('h4', {}, title), ...rows);
+}
+
+/** A collapsed-by-default variable group (for the prepended library's globals). */
+function collapsedGroup(title: string, rows: HTMLElement[]): HTMLElement {
+  const details = el('details', { class: 'var-group' });
+  details.appendChild(el('summary', { class: 'var-group-summary' }, title));
+  for (const row of rows) details.appendChild(row);
+  return details;
 }
 
 function tag(text: string): HTMLElement {

@@ -48,6 +48,11 @@ test('a breakpoint pauses Debug, exposes module variables, steps, and resumes', 
   const a = globals.find((g) => g.name === 'a');
   const b = globals.find((g) => g.name === 'b');
   assert.ok(a && b, 'the program globals a and b are listed');
+  // The user's globals declare *after* the prepended turtle library, so their decl spans map to
+  // a user-program line — the demo uses this to separate them from the library's globals.
+  assert.ok(session.userLineOf(a.declSpan) !== null, 'a is a user-program global');
+  const libraryGlobal = globals.find((g) => session.userLineOf(g.declSpan) === null);
+  assert.ok(libraryGlobal, 'the prepended library contributes globals declared before the program');
   const handle = session.instance.moduleGlobalValue(walk.generation, top.module, a.slot);
   assert.equal(session.instance.asInt(handle), 1n);
   session.instance.release(handle);

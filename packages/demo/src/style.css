@@ -201,11 +201,15 @@ canvas {
 .var-group {
   margin: 0.35rem 0;
 }
-.var-group h4 {
+.var-group h4,
+.var-group-summary {
   margin: 0 0 0.15rem;
   font-size: 0.72rem;
   color: var(--muted);
   font-weight: 600;
+}
+.var-group-summary {
+  cursor: pointer;
 }
 
 .stack {

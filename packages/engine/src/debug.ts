@@ -56,6 +56,10 @@ export interface GlobalBinding {
   readonly name: string;
   readonly kind: GlobalKind;
   readonly slot: number;
+  /** The `[start, end)` span of the declaration (E§8.1) — a host that prepends a library into
+   *  the entry module tells its own globals from the library's by whether this precedes the
+   *  prelude. */
+  readonly declSpan: Span;
 }
 
 /** The stack-walk result (E§8.2): the live frames (innermost first) then the tail-elided
