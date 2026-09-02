@@ -105,6 +105,33 @@ test('watch-it-run stops at a subexpression with its just-produced value', async
   session.free();
 });
 
+test('StepOver treats each call as one click — a suspending capability and a plain call', async () => {
+  // Regression (E§8.5). Two bugs made "step over" take several clicks per line:
+  //  1. `forward` suspends the `draw_line` capability; the depth anchor was recomputed at the
+  //     deep resume depth, degrading StepOver into StepInto — it stopped *inside* forward
+  //     (source not shown → `under`), several times, never advancing.
+  //  2. Any frame-pushing call stopped twice on its line — once at the callee's return, then at
+  //     the next statement.
+  // After the fix each user line is one StepOver click that advances and is not `under`.
+  const source = 'forward(50)\nright(90)\nforward(50)\nprint("hi")\n';
+  const session = newSession(source);
+  session.primeToUserCode();
+  assert.equal(session.currentLine(), 1, 'primed on the first user line');
+
+  const visited = [];
+  for (let i = 0; i < 10; i += 1) {
+    const stop = await session.run('over');
+    if (stop.kind !== 'paused') break;
+    assert.equal(stop.under, false, `stop ${i} must not be "under" a call whose source is hidden`);
+    visited.push(stop.line);
+  }
+  // Stepping over the three call statements (lines 1–3) advances one line per click, in order.
+  // (The final statement, line 4, is visited twice — the module-end drain adds a trailing stop
+  // there; a separate, pre-existing empty-boundary stop, not a call double.)
+  assert.deepEqual(visited.slice(0, 3), [2, 3, 4], `one advancing click per call line; saw ${visited}`);
+  session.free();
+});
+
 test('a value tree materializes a record without holding live handles', async () => {
   const { materializeValue } = await import('../dist/debug/inspect.js');
   const source = 'record Point with x, y end\nfn make()\n  let p = Point(x: 1, y: 2)\n  print("x")\n  p\nend\nmake()\n';
