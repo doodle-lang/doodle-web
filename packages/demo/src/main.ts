@@ -15,7 +15,7 @@ import { loadEngine } from '@doodle-lang/engine';
 import { runTurtleProgram, type RunResult } from './run.js';
 import { breakpointGutter, breakpointLines } from './debug/gutter.js';
 import { DebugPanels } from './debug/panels.js';
-import { DebugController, canvasSurfaceFactory, type DebugState } from './debug/controller.js';
+import { DebugController, canvasSurfaceFactory, faultLabel, type DebugState } from './debug/controller.js';
 import type { DebugDirective } from './debug/session.js';
 
 const STARTER = `# A growing spiral — Run (⌘/Ctrl-Enter) to animate, or Debug to step through.
@@ -189,7 +189,7 @@ function main(): void {
         setStatus('done', 'ok');
         break;
       case 'faulted':
-        setStatus(result.fault === 'cancelled' ? 'stopped' : `stopped: ${result.fault}`, 'warn');
+        setStatus(faultLabel(result.fault), 'warn');
         break;
       case 'raised':
         setStatus('error', 'error');

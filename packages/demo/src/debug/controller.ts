@@ -220,7 +220,7 @@ export class DebugController {
         this.deps.setStatus('done', 'ok');
         break;
       case 'faulted':
-        this.deps.setStatus(stop.fault === 'cancelled' ? 'stopped' : `stopped · ${stop.fault}`, 'warn');
+        this.deps.setStatus(faultLabel(stop.fault), 'warn');
         break;
       case 'raised':
         this.deps.setStatus('error', 'error');
@@ -244,6 +244,24 @@ export class DebugController {
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** A kid-facing status line for an engine fault (E§10.2). The engine's limits keep a program from
+ *  freezing the page; this explains *why* it stopped in plain words rather than a raw fault tag. */
+export function faultLabel(fault: string): string {
+  switch (fault) {
+    case 'cancelled':
+      return 'stopped';
+    case 'limit:op-result':
+    case 'limit:heap':
+      return 'stopped — that computation is too big';
+    case 'limit:step-budget':
+      return 'stopped — that took too long';
+    case 'limit:stack-depth':
+      return 'stopped — too much nesting';
+    default:
+      return `stopped — ${fault}`;
+  }
 }
 
 /** The demo's real drawing-surface factory (a CanvasSurface over the 2D context). */

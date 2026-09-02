@@ -42,13 +42,6 @@
         <div id="debug-panels" hidden aria-label="debugger"></div>
       </section>
     </main>
-    <footer>
-      <!-- Decision #9 (R8): a single unbounded op (e.g. a huge `**`) can briefly freeze the
-           tab; it then hits the heap limit. Documented; the real fix (a mid-computation
-           bignum-size cap) is deferred. -->
-      A very large single computation (like a huge <code>**</code>) can freeze the page for a
-      moment before it stops itself.
-    </footer>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
