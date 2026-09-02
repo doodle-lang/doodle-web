@@ -5,7 +5,7 @@
 // raise-trap panels. Only thin DOM glue lives here; the run and debug cores are Node-tested.
 
 import { EditorState, StateEffect, StateField } from '@codemirror/state';
-import { EditorView, keymap, lineNumbers, highlightActiveLine, Decoration } from '@codemirror/view';
+import { EditorView, keymap, highlightActiveLine, Decoration } from '@codemirror/view';
 import type { DecorationSet } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { syntaxHighlighting, defaultHighlightStyle } from '@codemirror/language';
@@ -74,17 +74,23 @@ function main(): void {
   const runButton = $('run') as HTMLButtonElement;
   const debugButton = $('debug') as HTMLButtonElement;
   const stopButton = $('stop') as HTMLButtonElement;
-  const debugBar = $('debug-bar');
   const watchBox = $('watch') as HTMLInputElement;
   const trapBox = $('trap') as HTMLInputElement;
   const speedSlider = $('speed') as HTMLInputElement;
-  // The slider (1 = slow … 5 = fast) sets the turtle animation speed and a paced-continue delay.
-  // At full speed the delay is 0 (Continue runs in big slices, as before); slower settings drive
-  // one statement per slice with a delay, so every line highlights, not just the drawing ones.
-  const speedValue = (): number => Number(speedSlider.value);
-  const turtleSpeed = (): number => speedValue() * 10;
-  const paceMs = (): number => (speedValue() >= 5 ? 0 : (5 - speedValue()) * 50);
-  const stepButtons = ['continue', 'step', 'into', 'over', 'out'].map((id) => $(id) as HTMLButtonElement);
+  // The slider (1 = slow … 5 = fast) sets the per-step dwell of a slow run. At 5 (fast) the dwell
+  // is 0 and Continue runs to the next breakpoint; below 5, a run auto-steps *over* calls with the
+  // dwell, showing the panels + line each step (so every user line is visible, not just drawing).
+  const paceMs = (): number =>
+    Number(speedSlider.value) >= 5 ? 0 : (5 - Number(speedSlider.value)) * 120;
+  const continueButton = $('continue') as HTMLButtonElement;
+  // The step buttons: the primary "Step" is step-over (the everyday one); "Into" descends into a
+  // call, "Out" runs to the end of the current call.
+  const stepActions: [HTMLButtonElement, DebugDirective][] = [
+    [$('step') as HTMLButtonElement, 'over'],
+    [$('into') as HTMLButtonElement, 'into'],
+    [$('out') as HTMLButtonElement, 'out'],
+  ];
+  const debugButtons = [continueButton, ...stepActions.map(([button]) => button)];
 
   const setExec = (line: number | null, under = false): void =>
     editor.dispatch({ effects: setExecLine.of({ line, under }) });
@@ -94,7 +100,6 @@ function main(): void {
     state: EditorState.create({
       doc: STARTER,
       extensions: [
-        lineNumbers(),
         breakpointGutter((line) => debug.toggleBreakpoint(line)),
         history(),
         highlightActiveLine(),
@@ -120,15 +125,17 @@ function main(): void {
   let debugState: DebugState = 'idle';
 
   const refreshButtons = (): void => {
-    const busy = runController !== null || debugState !== 'idle';
-    runButton.disabled = busy;
-    debugButton.disabled = busy;
-    stopButton.disabled = !busy;
-    debugBar.hidden = debugState === 'idle';
-    // The panels region stays visible for the whole debug session (running and paused), so it
-    // does not appear/disappear jarringly; it shows a placeholder while a drive is in flight.
-    $('debug-panels').hidden = debugState === 'idle';
-    for (const b of stepButtons) b.disabled = debugState !== 'paused';
+    const runActive = runController !== null;
+    const sessionActive = debugState !== 'idle';
+    runButton.disabled = runActive || sessionActive;
+    debugButton.disabled = runActive || sessionActive;
+    stopButton.disabled = !(runActive || sessionActive);
+    // Panels show for the whole debug session (running and paused); the debug bar is always
+    // present, so the step buttons can *start* a session from idle.
+    $('debug-panels').hidden = !sessionActive;
+    // Step controls are usable when idle (they enter debug mode) or paused; disabled mid-drive.
+    const stepUsable = !runActive && debugState !== 'running';
+    for (const button of debugButtons) button.disabled = !stepUsable;
   };
 
   const debug = new DebugController({
@@ -136,7 +143,6 @@ function main(): void {
     getBreakpointLines: () => breakpointLines(editor),
     watch: () => watchBox.checked,
     trapRaises: () => trapBox.checked,
-    turtleSpeed,
     pace: paceMs,
     makeSurface,
     frames: (cb) => window.requestAnimationFrame(cb),
@@ -155,25 +161,25 @@ function main(): void {
     },
   });
 
-  async function startDebug(): Promise<void> {
-    if (runController || debug.active) return;
-    setStatus('loading…', 'run');
+  // Every debug action may create a session (which needs the wasm loaded first).
+  const withEngine = async (action: () => Promise<void>): Promise<void> => {
+    if (runController) return;
     try {
       await loadEngine();
-      await debug.start();
+      await action();
     } catch (err) {
       setStatus('error', 'error');
       output.textContent += String(err instanceof Error ? err.message : err);
     }
-  }
+  };
 
-  debugButton.addEventListener('click', () => void startDebug());
-  for (const button of stepButtons) {
-    button.addEventListener('click', () => void debug.step(button.id as DebugDirective));
+  debugButton.addEventListener('click', () => void withEngine(() => debug.continueRun()));
+  continueButton.addEventListener('click', () => void withEngine(() => debug.continueRun()));
+  for (const [button, directive] of stepActions) {
+    button.addEventListener('click', () => void withEngine(() => debug.step(directive)));
   }
   watchBox.addEventListener('change', () => debug.setWatch(watchBox.checked));
   trapBox.addEventListener('change', () => debug.setTrapRaises(trapBox.checked));
-  speedSlider.addEventListener('input', () => debug.setPace(paceMs()));
 
   // --- Run (animate to completion) ---
 
@@ -208,7 +214,6 @@ function main(): void {
       const result = await runTurtleProgram(editor.state.doc.toString(), {
         surface,
         frames: (cb) => window.requestAnimationFrame(cb),
-        speed: turtleSpeed(),
         signal: runController.signal,
         onOutput: (text) => {
           output.textContent += text;

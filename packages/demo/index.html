@@ -23,12 +23,11 @@
         <span id="status" data-kind=""></span>
       </div>
     </header>
-    <div id="debug-bar" class="controls" hidden>
-      <button id="continue" type="button" title="Continue">▶</button>
-      <button id="step" type="button" title="Step">↷</button>
-      <button id="into" type="button" title="Step into">⤵</button>
-      <button id="over" type="button" title="Step over">⤼</button>
-      <button id="out" type="button" title="Step out">⤴</button>
+    <div id="debug-bar" class="controls">
+      <button id="continue" type="button" title="Continue to the next breakpoint">▶ Continue</button>
+      <button id="step" type="button" title="Step over — run the next line, stepping over any call">↷ Step</button>
+      <button id="into" type="button" title="Step into a call">↓ Into</button>
+      <button id="out" type="button" title="Step out — finish the current call">↑ Out</button>
       <label class="toggle"><input id="watch" type="checkbox" /> watch</label>
       <label class="toggle"><input id="trap" type="checkbox" /> trap raises</label>
       <label class="toggle">speed <input id="speed" type="range" min="1" max="5" step="1" value="5" /></label>

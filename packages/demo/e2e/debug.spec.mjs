@@ -52,3 +52,35 @@ test('stepping past a breakpoint advances the paused line', async ({ page }) => 
   await expect(page.locator('.cm-execLine')).not.toHaveText(firstLine ?? '', { timeout: 10_000 });
   await page.locator('#stop').click();
 });
+
+test('a step button starts debugging from idle (no breakpoint needed)', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('.cm-editor')).toBeVisible();
+  // No breakpoint: clicking Into enters debug mode and pauses at the first statement.
+  await page.locator('#into').click();
+  await expect(page.locator('#status')).toContainText('paused', { timeout: 20_000 });
+  await expect(page.locator('#debug-panels')).toBeVisible();
+  await expect(page.locator('.cm-execLine')).toBeVisible();
+  await page.locator('#stop').click();
+});
+
+test('clicking a line number sets a breakpoint', async ({ page }) => {
+  await page.goto('/');
+  const line = page.locator('.cm-line', { hasText: 'pencolor' }).first();
+  const lineBox = await line.boundingBox();
+  const gutterBox = await page.locator('.cm-lineNumbers').boundingBox();
+  await page.mouse.click(gutterBox.x + gutterBox.width / 2, lineBox.y + lineBox.height / 2);
+  await expect(page.locator('.cm-breakpoint-dot')).toBeVisible();
+});
+
+test('a click on a comment line snaps the breakpoint to a code line', async ({ page }) => {
+  await page.goto('/');
+  // The first line is a comment; the breakpoint should land on a later code line, not on it.
+  const comment = page.locator('.cm-line').first();
+  const box = await comment.boundingBox();
+  const gutterBox = await page.locator('.cm-breakpoint-gutter').boundingBox();
+  await page.mouse.click(gutterBox.x + gutterBox.width / 2, box.y + box.height / 2);
+  await expect(page.locator('.cm-breakpoint-dot')).toBeVisible();
+  const dotBox = await page.locator('.cm-breakpoint-dot').boundingBox();
+  expect(dotBox.y).toBeGreaterThan(box.y + box.height - 1);
+});

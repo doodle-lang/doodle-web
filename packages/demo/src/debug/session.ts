@@ -39,10 +39,6 @@ export interface DebugSessionOptions {
   readonly onOutput?: (text: string) => void;
   /** Pen travel per animation frame (turtle units). */
   readonly speed?: number;
-  /** Receives the executing user line at each statement while a **paced** `continue` runs (see
-   *  {@link DebugSession.setPace}), for a live line highlight — so slowing a run makes every line
-   *  visible, not just the drawing ones. */
-  readonly onLine?: (line: number | null) => void;
 }
 
 const FUEL = 100_000n;
@@ -69,8 +65,6 @@ export class DebugSession {
   private readonly preludeLines: number;
   private readonly outputDecoder = new TextDecoder('utf-8');
   private outputSeen = 0;
-  /** Per-statement delay (ms) for a paced `continue`; 0 = full-speed slices. */
-  private pace = 0;
   /** editor (1-based user) line → engine breakpoint id, for the breakpoints set here. */
   private readonly breakpointIds = new Map<number, number>();
 
@@ -120,13 +114,6 @@ export class DebugSession {
     this.instance.setObservationMode(on);
   }
 
-  /** Sets the per-statement delay (ms) for a paced `continue`: 0 runs full-speed (big slices);
-   *  a positive value drives one statement per slice and pauses between them, highlighting each
-   *  user line via `onLine` — so a slow run shows every line, not only the drawing ones. */
-  setPace(ms: number): void {
-    this.pace = Math.max(0, ms);
-  }
-
   /** Maps a module-source `[start,end)` span to a 1-based **user-program** line, or null when
    *  the span is in the prepended turtle library (nothing to show in the editor). */
   userLineOf(span: readonly [number, number] | null): number | null {
@@ -140,6 +127,21 @@ export class DebugSession {
     return this.userLineOf(spanOf(this.instance.currentUserSpan()));
   }
 
+  /** Runs the prepended turtle-library setup, stopping at the first **user-program** statement —
+   *  so a debug session starts on the user's first line rather than inside the library's
+   *  procedure definitions. Synchronous and full-speed: the library's top level only defines
+   *  procedures and state (no drawing capabilities), so no suspension occurs here. */
+  primeToUserCode(): void {
+    for (let guard = 0; guard < 100_000 && this.currentLine() === null; guard += 1) {
+      const result = this.instance.drive('step', FUEL);
+      const kind = result.kind;
+      const reason = result.pauseReason;
+      result.free();
+      if (kind !== 'paused') return; // terminal (e.g. an empty user program) or a suspension
+      if (reason !== 'step' && reason !== 'slice-end') return; // an unexpected breakpoint/raise-trap
+    }
+  }
+
   /**
    * Drives one directive to its next stop (E§7.3): fuel-slices with a yield between slices,
    * fulfils turtle capabilities, and returns at the first debug pause (breakpoint / step /
@@ -147,11 +149,7 @@ export class DebugSession {
    */
   async run(directive: DebugDirective): Promise<DebugStop> {
     if (this.options.signal?.aborted) this.instance.cancel();
-    // Paced `continue` drives one statement per slice (fuel 1) and delays between them, sampling
-    // the executing line — so slowing the run highlights every statement, not just drawing ones.
-    const paced = this.pace > 0 && directive === 'continue';
-    const fuel = paced ? 1n : FUEL;
-    let result = this.instance.drive(directive, fuel);
+    let result = this.instance.drive(directive, FUEL);
     for (;;) {
       const kind = result.kind;
 
@@ -160,10 +158,9 @@ export class DebugSession {
         result.free();
         this.flushOutput();
         if (reason === 'slice-end') {
-          if (paced) this.options.onLine?.(this.currentLine());
-          await this.betweenSlices(paced);
+          await new Promise<void>((resume) => this.scheduler(resume));
           if (this.options.signal?.aborted) this.instance.cancel();
-          result = this.instance.drive(directive, fuel);
+          result = this.instance.drive(directive, FUEL);
           continue;
         }
         const { line, under } = this.pausedLocation(reason);
@@ -171,7 +168,7 @@ export class DebugSession {
       }
 
       if (kind === 'suspended') {
-        await this.fulfilCapability(result, fuel);
+        await this.fulfilCapability(result);
         // Resolve resumes under the directive in force (E§7.3); loop reads the new outcome.
         result = this.lastResolveResult!;
         continue;
@@ -212,15 +209,9 @@ export class DebugSession {
 
   private lastResolveResult: ReturnType<DoodleInstance['resolve']> | undefined;
 
-  /** Yields between fuel slices: a paced delay (watch mode) or a scheduler macrotask. */
-  private betweenSlices(paced: boolean): Promise<void> {
-    if (paced) return new Promise<void>((resume) => setTimeout(resume, this.pace));
-    return new Promise<void>((resume) => this.scheduler(resume));
-  }
-
-  /** Decodes a capability request's argument handles, runs the turtle handler, and resolves under
-   *  `fuel` (E§7.5) — a thrown handler surfaces as a Doodle raise at the call site. */
-  private async fulfilCapability(result: ReturnType<DoodleInstance['drive']>, fuel: bigint): Promise<void> {
+  /** Decodes a capability request's argument handles, runs the turtle handler, and resolves
+   *  (E§7.5) — a thrown handler surfaces as a Doodle raise at the call site. */
+  private async fulfilCapability(result: ReturnType<DoodleInstance['drive']>): Promise<void> {
     const capability = result.capability!;
     const handles = Array.from(result.args ?? new BigUint64Array());
     result.free();
@@ -242,7 +233,7 @@ export class DebugSession {
       raise = true;
     }
     if (this.options.signal?.aborted) this.instance.cancel();
-    this.lastResolveResult = this.instance.resolve(handle, raise, fuel);
+    this.lastResolveResult = this.instance.resolve(handle, raise, FUEL);
     this.instance.release(handle);
   }
 
